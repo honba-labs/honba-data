@@ -38,7 +38,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from honba_data.loaders.fundamentals import (
+from honba_data.providers.fundamentals import (
     DuckDbFundamentalsStore,
     download_fundamentals_to_duckdb,
     fetch_large_midcap_universe,

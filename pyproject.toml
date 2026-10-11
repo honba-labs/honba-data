@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "honba-data"
 version = "0.1.0"
-description = "Financial data lakehouse, DuckDB fundamentals store, market loaders, and service layer for Honba Labs"
+description = "Financial data lakehouse, DuckDB fundamentals store, market providers, and service layer for Honba Labs"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Honba Labs" }]

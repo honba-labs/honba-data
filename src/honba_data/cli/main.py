@@ -9,7 +9,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from honba_data.loaders.fundamentals import download_fundamentals_to_duckdb
+from honba_data.providers.fundamentals import download_fundamentals_to_duckdb
 from honba_data.store.fundamentals import DuckDbFundamentalsStore, find_data_root
 
 app = typer.Typer(

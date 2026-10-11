@@ -1,6 +1,6 @@
 # honba-data
 
-Financial Data Lakehouse, DuckDB Fundamentals Store, Market Data Loaders, and Service Layer for Honba Labs.
+Financial Data Lakehouse, DuckDB Fundamentals Store, Market Data Providers, and Service Layer for Honba Labs.
 
 ## Overview
 
@@ -31,7 +31,7 @@ honba-data/
 ├── src/
 │   └── honba_data/
 │       ├── store/              # DuckDbFundamentalsStore & ParquetBarStore
-│       ├── loaders/            # fundamentals downloader, NSE Bhavcopy, yfinance
+│       ├── providers/          # fundamentals downloader, NSE Bhavcopy, yfinance
 │       ├── coverage/           # Coverage ledger & interval algebra
 │       ├── service/            # DataService port & contract
 │       └── cli/                # honba-data Typer CLI
@@ -71,7 +71,7 @@ python scripts/verify_fundamentals.py
 ```python
 import duckdb
 
-con = duckdb.connect("honba/data/fundamentals.duckdb")
+con = duckdb.connect("data/fundamentals.duckdb")
 
 # Screener query: Low Debt + High ROCE + High ROE
 df = con.execute("""
