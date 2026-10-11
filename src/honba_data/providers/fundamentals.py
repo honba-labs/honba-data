@@ -336,6 +336,14 @@ def fetch_and_parse_company(
                         as_of_ns,
                     )
                 )
+            if rev is not None:
+                metrics_records.append(
+                    ("NSE", comp.symbol, "total_revenue", period, "1D", rev, None, d_str, as_of_ns)
+                )
+            if net_inc is not None:
+                metrics_records.append(
+                    ("NSE", comp.symbol, "net_income", period, "1D", net_inc, None, d_str, as_of_ns)
+                )
 
     _compute_period_ratios(fin_y, bs_y, cf_y, "FY")
     _compute_period_ratios(fin_q, bs_q, cf_q, "FQ")

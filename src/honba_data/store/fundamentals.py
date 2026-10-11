@@ -140,6 +140,38 @@ class DuckDbFundamentalsStore:
                 );
             """)
 
+            # Ensure unique indexes for ON CONFLICT target resolution
+            con.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_companies_symbol ON companies(symbol);"
+            )
+            con.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_statements_pk ON financial_statements(symbol, period_type, statement_type, fiscal_date, line_item);"
+            )
+            con.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_ratios_pk ON financial_ratios(symbol, period_type, fiscal_date);"
+            )
+            con.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_metrics_pk ON instrument_metrics(symbol, metric_key, period, fiscal_date);"
+            )
+
+            # 5. Canonical unified price bars view over Parquet catalog (Option A Lakehouse)
+            catalog_glob = (
+                self.db_path.parent / "catalog" / "1D" / "NSE" / "*" / "*.parquet"
+            ).resolve()
+            if (self.db_path.parent / "catalog").is_dir():
+                con.execute(f"""
+                    CREATE OR REPLACE VIEW bars_1d AS
+                    SELECT
+                        regexp_extract(filename, 'NSE/([^/]+)/', 1) AS symbol,
+                        epoch_ms(ts // 1000000)::DATE AS bar_date,
+                        open,
+                        high,
+                        low,
+                        close,
+                        volume
+                    FROM read_parquet('{catalog_glob}', filename=true);
+                """)
+
     def save_company_data(
         self,
         company_meta: dict[str, Any],
