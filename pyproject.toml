@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "honba-data"
+version = "0.1.0"
+description = "Financial data lakehouse, DuckDB fundamentals store, market loaders, and service layer for Honba Labs"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Honba Labs" }]
+requires-python = ">=3.10"
+dependencies = [
+    "duckdb>=1.0.0",
+    "pyarrow>=14.0.0",
+    "pandas>=2.0.0",
+    "yfinance>=0.2.30",
+    "rich>=13.0.0",
+    "typer>=0.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio",
+    "ruff>=0.4.0",
+    "pyright>=1.1.350",
+]
+
+[project.scripts]
+honba-data = "honba_data.cli.main:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["honba_data*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["E402"]
+
+[tool.pyright]
+include = ["src", "scripts", "tests"]
+extraPaths = ["src"]
+executionEnvironments = [
+  { root = ".", extraPaths = ["src"] }
+]

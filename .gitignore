@@ -1,0 +1,48 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual Environments
+.venv/
+venv/
+env/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.bak
+
+# STRICT DATA INVARIANT: NEVER check in downloaded market/fundamental data files
+*.duckdb
+*.duckdb.wal
+*.parquet
+*.csv
+*.tsv
+*.xz
+*.gz
+*.zip
+*.tar
+data/
+catalog/
+cache/
+bhavcopy/
+journals/
+output/
+tmp/
