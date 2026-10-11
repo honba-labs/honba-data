@@ -17,8 +17,8 @@ def find_data_root(start_path: Path | None = None) -> Path:
 
     Resolution hierarchy:
     1. $HONBA_DATA_DIR environment variable if defined.
-    2. Nearest directory containing 'honba/data' or 'data'.
-    3. Sibling '../honba/data' if working within honba-labs workspace.
+    2. Nearest directory containing 'honba-data/data', 'data', or 'honba/data'.
+    3. Sibling 'honba-data/data' if working within honba-labs workspace.
     4. '<cwd>/data' fallback.
     """
     env = os.environ.get(DATA_DIR_ENV, "").strip()
@@ -27,13 +27,17 @@ def find_data_root(start_path: Path | None = None) -> Path:
 
     cur = (start_path or Path.cwd()).resolve()
     for p in [cur, *cur.parents]:
+        if (p / "honba-data" / "data").is_dir():
+            return (p / "honba-data" / "data").resolve()
+        if (p / "data").is_dir() and (p.name == "honba-data" or (p / "Cargo.toml").is_file()):
+            return (p / "data").resolve()
         if (p / "honba" / "data").is_dir():
             return (p / "honba" / "data").resolve()
         if (p / "data").is_dir():
             return (p / "data").resolve()
 
-    if (cur.parent / "honba" / "data").is_dir():
-        return (cur.parent / "honba" / "data").resolve()
+    if (cur.parent / "honba-data" / "data").is_dir():
+        return (cur.parent / "honba-data" / "data").resolve()
 
     return cur / "data"
 
@@ -59,7 +63,8 @@ class DuckDbFundamentalsStore:
         with self._get_connection() as con:
             # 1. Company directory
             con.execute("""
-                CREATE TABLE IF NOT EXISTS companies (\n                    symbol VARCHAR PRIMARY KEY,
+                CREATE TABLE IF NOT EXISTS companies (
+                    symbol VARCHAR PRIMARY KEY,
                     company_name VARCHAR,
                     industry VARCHAR,
                     sector VARCHAR,
