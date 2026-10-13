@@ -1,3 +1,4 @@
+# pyright: reportMissingTypeStubs=false
 """DuckDB-backed Fundamental Data Downloader (Yearly & Quarterly Financials).
 
 Downloads and stores yearly and quarterly financial statements, balance sheets, cash flows,
@@ -16,11 +17,13 @@ import dataclasses
 import datetime as dt
 import io
 import logging
+import math
 import urllib.error
 import urllib.request
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 import duckdb
 import pandas as pd
@@ -49,6 +52,26 @@ class CompanyMetadata:
     index_name: str  # "NIFTY 100" | "NIFTY MIDCAP 150"
 
 
+def _to_float(v: object) -> float | None:
+    """Safely cast an unknown object/scalar to float, returning None on failure or NaN."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        res = float(v)
+        return None if math.isnan(res) else res
+    if isinstance(v, (str, bytes)):
+        try:
+            res = float(v)
+            return None if math.isnan(res) else res
+        except (ValueError, TypeError):
+            return None
+    try:
+        res = float(cast(float, v))
+        return None if math.isnan(res) else res
+    except (ValueError, TypeError):
+        return None
+
+
 def fetch_large_midcap_universe(category: str = "ALL") -> list[CompanyMetadata]:
     """Fetch official constituent lists for Nifty 100 and Nifty Midcap 150 from NSE archives."""
     category_norm = category.upper()
@@ -58,19 +81,20 @@ def fetch_large_midcap_universe(category: str = "ALL") -> list[CompanyMetadata]:
     def _load_csv(url: str, cap: str, idx: str) -> list[CompanyMetadata]:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as resp:
-            content = resp.read().decode("utf-8")
+            raw_bytes: bytes = resp.read()
+            content: str = raw_bytes.decode("utf-8")
         reader = csv.DictReader(io.StringIO(content))
         items: list[CompanyMetadata] = []
         for row in reader:
-            sym = row.get("Symbol", "").strip()
+            sym = str(row.get("Symbol", "")).strip()
             if sym:
                 items.append(
                     CompanyMetadata(
                         symbol=sym,
-                        company_name=row.get("Company Name", "").strip(),
-                        industry=row.get("Industry", "").strip(),
-                        series=row.get("Series", "EQ").strip(),
-                        isin_code=row.get("ISIN Code", "").strip(),
+                        company_name=str(row.get("Company Name", "")).strip(),
+                        industry=str(row.get("Industry", "")).strip(),
+                        series=str(row.get("Series", "EQ")).strip(),
+                        isin_code=str(row.get("ISIN Code", "")).strip(),
                         cap_category=cap,
                         index_name=idx,
                     )
@@ -100,22 +124,22 @@ def fetch_large_midcap_universe(category: str = "ALL") -> list[CompanyMetadata]:
     return deduped
 
 
-def _safe_get(df: pd.DataFrame | None, keys: list[str], col: Any) -> float | None:
+def _safe_get(df: pd.DataFrame | None, keys: list[str], col: object) -> float | None:
     if df is None or df.empty:
         return None
-    target_col = col
-    if col not in df.columns:
-        matching_cols = [c for c in df.columns if c <= col]
+    target_col: object = col
+    cols: list[object] = list(cast(Iterable[object], df.columns))
+    if col not in cols:
+        matching_cols: list[object] = [c for c in cols if str(c) <= str(col)]
         if not matching_cols:
             return None
-        target_col = max(matching_cols)
+        target_col = max(matching_cols, key=str)
 
     for k in keys:
         if k in df.index:
             try:
-                v = df.loc[k, target_col]
-                if pd.notna(v):
-                    return float(v)
+                v: object = cast(object, df.loc[k, target_col])  # pyright: ignore[reportUnknownMemberType]
+                return _to_float(v)
             except (ValueError, TypeError, AttributeError, KeyError):
                 continue
     return None
@@ -123,7 +147,12 @@ def _safe_get(df: pd.DataFrame | None, keys: list[str], col: Any) -> float | Non
 
 def fetch_and_parse_company(
     comp: CompanyMetadata,
-) -> tuple[dict[str, Any], list[Any], list[Any], list[Any]]:
+) -> tuple[
+    dict[str, object],
+    list[tuple[str, str, str, str, str, float]],
+    list[tuple[object, ...]],
+    list[tuple[object, ...]],
+]:
     """Download yearly and quarterly statements via yfinance and compute financial ratios."""
     ticker_sym = f"{comp.symbol}.NS"
     t = yf.Ticker(ticker_sym)
@@ -135,26 +164,30 @@ def fetch_and_parse_company(
     cf_y = t.cashflow
     cf_q = t.quarterly_cashflow
 
+    info: dict[str, object] = {}
     try:
-        info = t.info or {}
+        raw_info: object = getattr(t, "info", None)
+        if isinstance(raw_info, dict):
+            for k, val in cast(dict[object, object], raw_info).items():
+                info[str(k)] = val
     except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError):
         info = {}
 
-    comp_dict: dict[str, Any] = {
+    comp_dict: dict[str, object] = {
         "symbol": comp.symbol,
         "company_name": comp.company_name,
         "industry": comp.industry,
-        "sector": info.get("sector") or comp.industry,
+        "sector": str(info.get("sector")) if info.get("sector") else comp.industry,
         "series": comp.series,
         "isin_code": comp.isin_code,
         "cap_category": comp.cap_category,
         "index_name": comp.index_name,
-        "market_cap": info.get("marketCap"),
-        "pe_trailing": info.get("trailingPE"),
-        "pe_forward": info.get("forwardPE"),
-        "pb_ratio": info.get("priceToBook"),
-        "trailing_eps": info.get("trailingEps"),
-        "forward_eps": info.get("forwardEps"),
+        "market_cap": _to_float(info.get("marketCap")),
+        "pe_trailing": _to_float(info.get("trailingPE")),
+        "pe_forward": _to_float(info.get("forwardPE")),
+        "pb_ratio": _to_float(info.get("priceToBook")),
+        "trailing_eps": _to_float(info.get("trailingEps")),
+        "forward_eps": _to_float(info.get("forwardEps")),
     }
 
     statements_records: list[tuple[str, str, str, str, str, float]] = []
@@ -162,17 +195,22 @@ def fetch_and_parse_company(
     def _extract_statements(df: pd.DataFrame | None, period: str, stmt_name: str) -> None:
         if df is None or df.empty:
             return
-        for col in df.columns:
+        cols: list[object] = list(cast(Iterable[object], df.columns))
+        for col in cols:
             try:
-                d_str = str(col.date())
+                col_date = getattr(col, "date", None)
+                d_str = str(col_date() if callable(col_date) else col)
             except (ValueError, TypeError, AttributeError):
                 continue
-            series_or_val = df[col]
+            series_or_val: object = cast(object, df[col])  # pyright: ignore[reportUnknownMemberType]
             if hasattr(series_or_val, "items"):
-                for item, val in series_or_val.items():
+                items_iter = cast(
+                    Iterable[tuple[object, object]], getattr(series_or_val, "items")()
+                )
+                for item, val in items_iter:
                     try:
-                        v_float = float(val)  # type: ignore[arg-type]
-                        if pd.notna(v_float):
+                        v_float = _to_float(val)
+                        if v_float is not None:
                             statements_records.append(
                                 (comp.symbol, period, stmt_name, d_str, str(item), v_float)
                             )
@@ -186,8 +224,8 @@ def fetch_and_parse_company(
     _extract_statements(cf_y, "FY", "CASH_FLOW")
     _extract_statements(cf_q, "FQ", "CASH_FLOW")
 
-    ratios_records: list[tuple[Any, ...]] = []
-    metrics_records: list[tuple[Any, ...]] = []
+    ratios_records: list[tuple[object, ...]] = []
+    metrics_records: list[tuple[object, ...]] = []
 
     def _compute_period_ratios(
         fin_df: pd.DataFrame | None,
@@ -197,11 +235,14 @@ def fetch_and_parse_company(
     ) -> None:
         if fin_df is None or fin_df.empty:
             return
-        dates = [c for c in fin_df.columns]
+        dates: list[object] = list(cast(Iterable[object], fin_df.columns))
         for d in dates:
             try:
-                d_str = str(d.date())
-                d_date = d.date()
+                d_date_fn = getattr(d, "date", None)
+                d_date = d_date_fn() if callable(d_date_fn) else None
+                if not isinstance(d_date, dt.date):
+                    continue
+                d_str = str(d_date)
                 as_of_ns = int(
                     dt.datetime.combine(d_date, dt.time(18, 0), tzinfo=dt.timezone.utc).timestamp()
                     * 1e9
@@ -342,7 +383,17 @@ def fetch_and_parse_company(
                 )
             if net_inc is not None:
                 metrics_records.append(
-                    ("NSE", comp.symbol, "net_income", period, "1D", net_inc, None, d_str, as_of_ns)
+                    (
+                        "NSE",
+                        comp.symbol,
+                        "net_income",
+                        period,
+                        "1D",
+                        net_inc,
+                        None,
+                        d_str,
+                        as_of_ns,
+                    )
                 )
 
     _compute_period_ratios(fin_y, bs_y, cf_y, "FY")
@@ -350,7 +401,8 @@ def fetch_and_parse_company(
 
     today_date = dt.datetime.now(tz=dt.timezone.utc).date()
     today_ns = int(dt.datetime.now(tz=dt.timezone.utc).timestamp() * 1e9)
-    if info.get("trailingPE"):
+    pe_val = _to_float(info.get("trailingPE"))
+    if pe_val is not None:
         metrics_records.append(
             (
                 "NSE",
@@ -358,13 +410,15 @@ def fetch_and_parse_company(
                 "price_earnings_ttm",
                 "TTM",
                 "1D",
-                float(info["trailingPE"]),
+                pe_val,
                 None,
                 str(today_date),
                 today_ns,
             )
         )
-    if info.get("priceToBook"):
+
+    pb_val = _to_float(info.get("priceToBook"))
+    if pb_val is not None:
         metrics_records.append(
             (
                 "NSE",
@@ -372,7 +426,7 @@ def fetch_and_parse_company(
                 "price_book",
                 "TTM",
                 "1D",
-                float(info["priceToBook"]),
+                pb_val,
                 None,
                 str(today_date),
                 today_ns,
@@ -388,16 +442,15 @@ def download_fundamentals_to_duckdb(
     max_workers: int = 8,
     limit: int | None = None,
     skip_existing: bool = True,
-    progress_callback: Any = None,
-) -> dict[str, Any]:
+    progress_callback: object | None = None,
+) -> dict[str, str | int | None]:
     """Download yearly and quarterly financials for large and mid cap companies and store in DuckDB."""
     store = DuckDbFundamentalsStore(db_path=db_path)
     companies = fetch_large_midcap_universe(universe_category)
 
     if skip_existing:
         try:
-            with store._get_connection() as con:
-                existing = {r[0] for r in con.execute("SELECT symbol FROM companies").fetchall()}
+            existing = store.get_existing_symbols()
             companies = [c for c in companies if c.symbol not in existing]
         except (duckdb.Error, OSError):
             pass
@@ -420,7 +473,7 @@ def download_fundamentals_to_duckdb(
                 comp_meta, stmts, ratios, metrics = future.result()
                 store.save_company_data(comp_meta, stmts, ratios, metrics)
                 success_count += 1
-                if progress_callback:
+                if callable(progress_callback):
                     progress_callback(i, total_comps, comp.symbol, True)
             except (
                 urllib.error.URLError,
@@ -432,7 +485,7 @@ def download_fundamentals_to_duckdb(
             ) as e:
                 fail_count += 1
                 logger.error(f"Error processing {comp.symbol}: {e}")
-                if progress_callback:
+                if callable(progress_callback):
                     progress_callback(i, total_comps, comp.symbol, False)
 
     summary = store.get_summary()

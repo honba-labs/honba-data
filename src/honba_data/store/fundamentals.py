@@ -1,11 +1,12 @@
+# pyright: reportMissingTypeStubs=false
 """DuckDB storage engine for company financial statements and ratios."""
 
 from __future__ import annotations
 
 import datetime as dt
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
 import duckdb
 
@@ -45,6 +46,8 @@ def find_data_root(start_path: Path | None = None) -> Path:
 class DuckDbFundamentalsStore:
     """Embedded DuckDB storage engine for company financial statements and ratios."""
 
+    db_path: Path
+
     def __init__(self, db_path: Path | str | None = None) -> None:
         if db_path is None:
             data_root = find_data_root()
@@ -59,10 +62,15 @@ class DuckDbFundamentalsStore:
     def _get_connection(self) -> duckdb.DuckDBPyConnection:
         return duckdb.connect(str(self.db_path))
 
+    def get_existing_symbols(self) -> set[str]:
+        """Return the set of company symbols already persisted in DuckDB."""
+        with self._get_connection() as con:
+            return {str(r[0]) for r in con.execute("SELECT symbol FROM companies").fetchall()}
+
     def _init_schema(self) -> None:
         with self._get_connection() as con:
             # 1. Company directory
-            con.execute("""
+            _ = con.execute("""
                 CREATE TABLE IF NOT EXISTS companies (
                     symbol VARCHAR PRIMARY KEY,
                     company_name VARCHAR,
@@ -83,7 +91,7 @@ class DuckDbFundamentalsStore:
             """)
 
             # 2. Financial statements line items (Income, Balance Sheet, Cash Flow)
-            con.execute("""
+            _ = con.execute("""
                 CREATE TABLE IF NOT EXISTS financial_statements (
                     symbol VARCHAR,
                     period_type VARCHAR,
@@ -97,7 +105,7 @@ class DuckDbFundamentalsStore:
             """)
 
             # 3. Standardized financial ratios per fiscal date
-            con.execute("""
+            _ = con.execute("""
                 CREATE TABLE IF NOT EXISTS financial_ratios (
                     symbol VARCHAR,
                     period_type VARCHAR,
@@ -125,7 +133,7 @@ class DuckDbFundamentalsStore:
             """)
 
             # 4. Canonical Honba screener facts table (Design.md Section 14.3)
-            con.execute("""
+            _ = con.execute("""
                 CREATE TABLE IF NOT EXISTS instrument_metrics (
                     venue VARCHAR DEFAULT 'NSE',
                     symbol VARCHAR,
@@ -141,16 +149,16 @@ class DuckDbFundamentalsStore:
             """)
 
             # Ensure unique indexes for ON CONFLICT target resolution
-            con.execute(
+            _ = con.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_companies_symbol ON companies(symbol);"
             )
-            con.execute(
+            _ = con.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_statements_pk ON financial_statements(symbol, period_type, statement_type, fiscal_date, line_item);"
             )
-            con.execute(
+            _ = con.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_ratios_pk ON financial_ratios(symbol, period_type, fiscal_date);"
             )
-            con.execute(
+            _ = con.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_metrics_pk ON instrument_metrics(symbol, metric_key, period, fiscal_date);"
             )
 
@@ -159,7 +167,7 @@ class DuckDbFundamentalsStore:
                 self.db_path.parent / "catalog" / "1D" / "NSE" / "*" / "*.parquet"
             ).resolve()
             if (self.db_path.parent / "catalog").is_dir():
-                con.execute(f"""
+                _ = con.execute(f"""
                     CREATE OR REPLACE VIEW bars_1d AS
                     SELECT
                         regexp_extract(filename, 'NSE/([^/]+)/', 1) AS symbol,
@@ -174,15 +182,15 @@ class DuckDbFundamentalsStore:
 
     def save_company_data(
         self,
-        company_meta: dict[str, Any],
-        statements: list[tuple[str, str, str, str, str, float]],
-        ratios: list[tuple[Any, ...]],
-        metrics: list[tuple[Any, ...]],
+        company_meta: dict[str, object],
+        statements: Sequence[tuple[str, str, str, str, str, float]],
+        ratios: Sequence[tuple[object, ...]],
+        metrics: Sequence[tuple[object, ...]],
     ) -> None:
         """Atomically upsert all financial data for a single company."""
         with self._get_connection() as con:
             # Upsert company
-            con.execute(
+            _ = con.execute(
                 """
                 INSERT INTO companies (
                     symbol, company_name, industry, sector, series, isin_code,
@@ -222,7 +230,7 @@ class DuckDbFundamentalsStore:
 
             # Insert/replace statements
             if statements:
-                con.executemany(
+                _ = con.executemany(
                     """
                     INSERT INTO financial_statements (
                         symbol, period_type, statement_type, fiscal_date, line_item, value
@@ -235,7 +243,7 @@ class DuckDbFundamentalsStore:
 
             # Insert/replace ratios
             if ratios:
-                con.executemany(
+                _ = con.executemany(
                     """
                     INSERT INTO financial_ratios (
                         symbol, period_type, fiscal_date, revenue, ebitda, ebit, net_income,
@@ -268,7 +276,7 @@ class DuckDbFundamentalsStore:
 
             # Insert/replace screener metrics facts
             if metrics:
-                con.executemany(
+                _ = con.executemany(
                     """
                     INSERT INTO instrument_metrics (
                         venue, symbol, metric_key, period, timeframe, value_num, value_text, fiscal_date, as_of_ns
@@ -281,13 +289,13 @@ class DuckDbFundamentalsStore:
                     metrics,
                 )
 
-    def get_summary(self) -> dict[str, Any]:
+    def get_summary(self) -> dict[str, str | int | None]:
         """Return dataset counts and inventory statistics."""
         with self._get_connection() as con:
 
             def _fetch_scalar(query: str) -> int:
                 r = con.execute(query).fetchone()
-                return int(r[0]) if r else 0
+                return int(r[0]) if r and r[0] is not None else 0
 
             comp_count = _fetch_scalar("SELECT count(*) FROM companies")
             stmt_count = _fetch_scalar("SELECT count(*) FROM financial_statements")
@@ -297,7 +305,6 @@ class DuckDbFundamentalsStore:
             dates = con.execute(
                 "SELECT min(fiscal_date), max(fiscal_date) FROM financial_ratios"
             ).fetchone()
-
             large_count = _fetch_scalar(
                 "SELECT count(*) FROM companies WHERE cap_category='LARGE_CAP'"
             )
@@ -311,6 +318,6 @@ class DuckDbFundamentalsStore:
             "statements_records": stmt_count,
             "ratios_records": ratio_count,
             "screener_facts": facts_count,
-            "min_fiscal_date": str(dates[0]) if dates and dates[0] else None,
-            "max_fiscal_date": str(dates[1]) if dates and dates[1] else None,
+            "min_fiscal_date": str(dates[0]) if dates and dates[0] is not None else None,
+            "max_fiscal_date": str(dates[1]) if dates and dates[1] is not None else None,
         }

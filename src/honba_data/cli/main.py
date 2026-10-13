@@ -83,7 +83,7 @@ def summary_cmd(
     table.add_column("Property", style="cyan")
     table.add_column("Value", style="green")
 
-    table.add_row("Database File", s["db_path"])
+    table.add_row("Database File", str(s["db_path"]))
     table.add_row("Total Companies", str(s["companies_total"]))
     table.add_row("Large-Cap Companies", str(s["large_cap_companies"]))
     table.add_row("Mid-Cap Companies", str(s["mid_cap_companies"]))
