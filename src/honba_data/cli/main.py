@@ -9,12 +9,14 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from honba_data.live.cli import live_app
 from honba_data.providers.fundamentals import download_fundamentals_to_duckdb
 from honba_data.store.fundamentals import DuckDbFundamentalsStore, find_data_root
 
 app = typer.Typer(
     help="honba-data CLI: manage market data, fundamentals, and DuckDB store", no_args_is_help=True
 )
+app.add_typer(live_app, name="live")
 console = Console()
 err_console = Console(stderr=True)
 
