@@ -7,6 +7,7 @@ import datetime as dt
 import os
 from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
 import duckdb
 
@@ -65,7 +66,10 @@ class DuckDbFundamentalsStore:
     def get_existing_symbols(self) -> set[str]:
         """Return the set of company symbols already persisted in DuckDB."""
         with self._get_connection() as con:
-            return {str(r[0]) for r in con.execute("SELECT symbol FROM companies").fetchall()}
+            return {
+                str(cast(object, r[0]))
+                for r in con.execute("SELECT symbol FROM companies").fetchall()
+            }
 
     def _init_schema(self) -> None:
         with self._get_connection() as con:
@@ -295,7 +299,7 @@ class DuckDbFundamentalsStore:
 
             def _fetch_scalar(query: str) -> int:
                 r = con.execute(query).fetchone()
-                return int(r[0]) if r and r[0] is not None else 0
+                return int(cast(int, r[0])) if r and r[0] is not None else 0
 
             comp_count = _fetch_scalar("SELECT count(*) FROM companies")
             stmt_count = _fetch_scalar("SELECT count(*) FROM financial_statements")
@@ -318,6 +322,10 @@ class DuckDbFundamentalsStore:
             "statements_records": stmt_count,
             "ratios_records": ratio_count,
             "screener_facts": facts_count,
-            "min_fiscal_date": str(dates[0]) if dates and dates[0] is not None else None,
-            "max_fiscal_date": str(dates[1]) if dates and dates[1] is not None else None,
+            "min_fiscal_date": str(cast(object, dates[0]))
+            if dates and dates[0] is not None
+            else None,
+            "max_fiscal_date": str(cast(object, dates[1]))
+            if dates and dates[1] is not None
+            else None,
         }

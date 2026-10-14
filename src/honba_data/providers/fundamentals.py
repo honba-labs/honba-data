@@ -81,7 +81,8 @@ def fetch_large_midcap_universe(category: str = "ALL") -> list[CompanyMetadata]:
     def _load_csv(url: str, cap: str, idx: str) -> list[CompanyMetadata]:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as resp:
-            raw_bytes: bytes = resp.read()
+            resp_bytes: object = resp.read()
+            raw_bytes: bytes = cast(bytes, resp_bytes)
             content: str = raw_bytes.decode("utf-8")
         reader = csv.DictReader(io.StringIO(content))
         items: list[CompanyMetadata] = []
@@ -138,7 +139,7 @@ def _safe_get(df: pd.DataFrame | None, keys: list[str], col: object) -> float | 
     for k in keys:
         if k in df.index:
             try:
-                v: object = cast(object, df.loc[k, target_col])  # pyright: ignore[reportUnknownMemberType]
+                v: object = cast(object, df.loc[k, target_col])
                 return _to_float(v)
             except (ValueError, TypeError, AttributeError, KeyError):
                 continue
@@ -202,7 +203,7 @@ def fetch_and_parse_company(
                 d_str = str(col_date() if callable(col_date) else col)
             except (ValueError, TypeError, AttributeError):
                 continue
-            series_or_val: object = cast(object, df[col])  # pyright: ignore[reportUnknownMemberType]
+            series_or_val: object = cast(object, df[col])
             if hasattr(series_or_val, "items"):
                 items_iter = cast(
                     Iterable[tuple[object, object]], getattr(series_or_val, "items")()
@@ -474,7 +475,7 @@ def download_fundamentals_to_duckdb(
                 store.save_company_data(comp_meta, stmts, ratios, metrics)
                 success_count += 1
                 if callable(progress_callback):
-                    progress_callback(i, total_comps, comp.symbol, True)
+                    _ = progress_callback(i, total_comps, comp.symbol, True)
             except (
                 urllib.error.URLError,
                 TimeoutError,
@@ -486,7 +487,7 @@ def download_fundamentals_to_duckdb(
                 fail_count += 1
                 logger.error(f"Error processing {comp.symbol}: {e}")
                 if callable(progress_callback):
-                    progress_callback(i, total_comps, comp.symbol, False)
+                    _ = progress_callback(i, total_comps, comp.symbol, False)
 
     summary = store.get_summary()
     summary["success_count"] = success_count

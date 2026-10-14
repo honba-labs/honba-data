@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -26,12 +27,12 @@ def mf_store(tmp_path: Path) -> DuckDbMutualFundsStore:
 def populated_stores(tmp_path: Path) -> tuple[DuckDbMutualFundsStore, Path]:
     # 1. Setup mock equity fundamentals DB
     eq_db = tmp_path / "test_eq.duckdb"
-    DuckDbFundamentalsStore(eq_db)
+    _ = DuckDbFundamentalsStore(eq_db)
     import duckdb
 
     con = duckdb.connect(str(eq_db))
     # Insert companies
-    con.execute("""
+    _ = con.execute("""
         INSERT INTO companies (symbol, company_name, isin_code, cap_category, pe_trailing)
         VALUES
             ('RELIANCE', 'Reliance Industries Ltd', 'INE002A01018', 'LargeCap', 24.5),
@@ -48,57 +49,58 @@ def populated_stores(tmp_path: Path) -> tuple[DuckDbMutualFundsStore, Path]:
     """)
     con.close()
 
-    # 2. Setup MF store with 2 schemes
+    # 2. Setup mock mutual funds DB
     mf_db = tmp_path / "test_mf.duckdb"
     mf_store = DuckDbMutualFundsStore(mf_db)
 
+    # Insert schemes
     schemes = [
         SchemeMetadata(
             scheme_code="122639",
+            isin_growth="INF209K01168",
             scheme_name="Parag Parikh Flexi Cap Fund - Direct Plan - Growth",
             amc_name="PPFAS Mutual Fund",
             category="Equity:Flexi Cap",
             plan="Direct",
             option_type="Growth",
-            isin_growth="INF879O01027",
-            fund_manager="Rajeev Thakkar",
-            inception_date=dt.date(2013, 5, 28),
+            benchmark_symbol="NIFTY500",
         ),
         SchemeMetadata(
             scheme_code="118989",
-            scheme_name="HDFC Flexi Cap Fund - Direct Plan - Growth",
+            isin_growth="INF179K01BE2",
+            scheme_name="HDFC Flexi Cap Fund - Direct Plan - Growth Option",
             amc_name="HDFC Mutual Fund",
             category="Equity:Flexi Cap",
             plan="Direct",
             option_type="Growth",
-            isin_growth="INF179K01BE2",
-            fund_manager="Roshi Jain",
-            inception_date=dt.date(2013, 1, 1),
+            benchmark_symbol="NIFTY500",
         ),
     ]
     mf_store.upsert_schemes(schemes)
 
-    # Insert stats
+    # Insert fund stats
     stats = [
         FundStat(
-            asof_date=dt.date(2026, 10, 1),
+            asof_date=dt.date(2026, 9, 30),
             scheme_code="122639",
-            nav=85.42,
-            ter_pct=0.62,
-            aum_cr=72400.0,
+            nav=85.50,
+            ter_pct=0.75,
+            aum_cr=75000.0,
+            portfolio_turnover_pct=15.0,
         ),
         FundStat(
-            asof_date=dt.date(2026, 10, 1),
+            asof_date=dt.date(2026, 9, 30),
             scheme_code="118989",
-            nav=1950.25,
-            ter_pct=0.81,
-            aum_cr=58120.0,
+            nav=1950.0,
+            ter_pct=0.82,
+            aum_cr=62000.0,
+            portfolio_turnover_pct=35.0,
         ),
     ]
     mf_store.upsert_stats(stats)
 
     # Insert holdings for PPFAS (122639)
-    # 8% HDFCBANK, 7% INFY, 5% RELIANCE, 3% DIXON
+    # 8% HDFCBANK, 7% INFY, 5% RELIANCE, 3% DIXON -> Total 23%
     holdings_ppfas = [
         FundHolding(
             report_date=dt.date(2026, 9, 30),
@@ -205,9 +207,13 @@ def test_equity_cross_reference_fundamentals(
     assert funda["mid_cap_pct"] == 3.0  # 3 (DIXON)
     assert funda["portfolio_roce"] is not None
     # Weighted ROCE: (8*16.8 + 7*31.2 + 5*12.5 + 3*25.4) / 23 = (134.4 + 218.4 + 62.5 + 76.2) / 23 = 491.5 / 23 = 21.37 -> ~21.4%
-    assert 21.0 <= funda["portfolio_roce"] <= 22.0
-    assert len(funda["holdings"]) == 4
-    symbols = [h["symbol"] for h in funda["holdings"]]
+    roce = cast(float, funda["portfolio_roce"])
+    assert 21.0 <= roce <= 22.0
+    holdings_obj: object = funda["holdings"]
+    assert isinstance(holdings_obj, list)
+    holdings = cast(list[dict[str, object]], holdings_obj)
+    assert len(holdings) == 4
+    symbols = [str(h["symbol"]) for h in holdings]
     assert "HDFCBANK" in symbols
     assert "INFY" in symbols
     assert "RELIANCE" in symbols

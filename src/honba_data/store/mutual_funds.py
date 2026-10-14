@@ -7,7 +7,7 @@ import datetime as dt
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 import duckdb
 
@@ -71,7 +71,7 @@ class DuckDbMutualFundsStore:
         """Initialise tables for mutual fund master, stats, holdings, and benchmarks."""
         con = duckdb.connect(str(self.db_path))
         try:
-            con.execute("""
+            _ = con.execute("""
                 CREATE TABLE IF NOT EXISTS mf_schemes (
                     scheme_code VARCHAR PRIMARY KEY,
                     isin_growth VARCHAR,
@@ -124,7 +124,7 @@ class DuckDbMutualFundsStore:
         con = duckdb.connect(str(self.db_path))
         try:
             for s in schemes:
-                con.execute(
+                _ = con.execute(
                     """
                     INSERT INTO mf_schemes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (scheme_code) DO UPDATE SET
@@ -162,7 +162,7 @@ class DuckDbMutualFundsStore:
         con = duckdb.connect(str(self.db_path))
         try:
             for st in stats:
-                con.execute(
+                _ = con.execute(
                     """
                     INSERT INTO mf_fund_stats VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT (asof_date, scheme_code) DO UPDATE SET
@@ -189,7 +189,7 @@ class DuckDbMutualFundsStore:
         con = duckdb.connect(str(self.db_path))
         try:
             for h in holdings:
-                con.execute(
+                _ = con.execute(
                     """
                     INSERT INTO mf_holdings VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (report_date, scheme_code, isin) DO UPDATE SET
@@ -218,11 +218,11 @@ class DuckDbMutualFundsStore:
         category: str | None = None,
         plan: str | None = "Direct",
         option: str | None = "Growth",
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, object]]:
         con = duckdb.connect(str(self.db_path))
         try:
             conditions = ["1=1"]
-            params: list[Any] = []
+            params: list[object] = []
             if category and category.lower() != "all":
                 conditions.append("lower(category) = lower(?)")
                 params.append(category)
@@ -248,7 +248,7 @@ class DuckDbMutualFundsStore:
         asof_date: dt.date | None = None,
         equity_db_path: Path | str | None = None,
         disclosure_lag_days: int = 10,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Cross-reference mutual fund holdings against fundamentals.duckdb.
 
         Joins ``mf_holdings.isin`` with ``companies.isin_code`` to calculate:
@@ -278,7 +278,7 @@ class DuckDbMutualFundsStore:
 
         con = duckdb.connect(str(self.db_path))
         try:
-            con.execute(f"ATTACH '{equity_path}' AS eq (READ_ONLY)")
+            _ = con.execute(f"ATTACH '{equity_path}' AS eq (READ_ONLY)")
 
             asof = asof_date or dt.date.today()
             cutoff = (asof - dt.timedelta(days=max(0, disclosure_lag_days))).isoformat()
@@ -305,7 +305,8 @@ class DuckDbMutualFundsStore:
                     "holdings": [],
                 }
 
-            report_date_str = str(rep_date_res[0])
+            rep_val: object = rep_date_res[0]
+            report_date_str = str(rep_val)
 
             query = f"""
             WITH raw_holdings AS (
@@ -358,24 +359,37 @@ class DuckDbMutualFundsStore:
             mid_cap = 0.0
             small_cap = 0.0
 
-            holdings_list = []
+            holdings_list: list[dict[str, object]] = []
             for r in rows:
-                isin, sym, name, a_class, cap_cat, pct, roce, pe, de = r
-                pct = float(pct or 0.0)
-                roce_f = float(roce) if roce is not None else None
-                pe_f = float(pe) if pe is not None and pe > 0 else None
-                de_f = float(de) if de is not None else None
+                r_t: tuple[object, ...] = cast(tuple[object, ...], r)
+                isin = str(r_t[0])
+                sym = str(r_t[1]) if r_t[1] is not None else isin
+                name = str(r_t[2]) if r_t[2] is not None else str(r_t[1])
+                a_class = str(r_t[3])
+                cap_cat = str(r_t[4]) if r_t[4] is not None else "Unclassified"
+                pct_obj: object = r_t[5]
+                pct = float(cast(float, pct_obj)) if pct_obj is not None else 0.0
+                roce_obj: object = r_t[6]
+                roce_f = float(cast(float, roce_obj)) if roce_obj is not None else None
+                pe_obj: object = r_t[7]
+                pe_f = (
+                    float(cast(float, pe_obj))
+                    if pe_obj is not None and float(cast(float, pe_obj)) > 0
+                    else None
+                )
+                de_obj: object = r_t[8]
+                de_f = float(cast(float, de_obj)) if de_obj is not None else None
 
                 if a_class == "Equity":
                     total_equity_pct += pct
                     if sym != isin:  # Matched to equity DB
                         covered_equity_pct += pct
-                        cap_upper = str(cap_cat).upper()
+                        cap_upper = cap_cat.upper()
                         if "LARGE" in cap_upper:
                             large_cap += pct
                         elif "MID" in cap_upper:
                             mid_cap += pct
-                        elif cap_cat == "SmallCap":
+                        elif "SMALL" in cap_upper:
                             small_cap += pct
 
                         if roce_f is not None:
@@ -429,7 +443,7 @@ class DuckDbMutualFundsStore:
         scheme_a: str,
         scheme_b: str,
         asof_date: dt.date | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Compute the portfolio holdings overlap percentage between two schemes.
 
         Overlap(A, B) = SUM(min(w_A, w_B)) across common equity holdings.
@@ -465,21 +479,30 @@ class DuckDbMutualFundsStore:
                 query, [scheme_a, scheme_a, asof_str, scheme_b, scheme_b, asof_str]
             ).fetchall()
 
-            total_overlap = sum(r[3] for r in rows)
+            total_overlap = 0.0
+            common_items: list[dict[str, object]] = []
+            for r in rows:
+                r_t: tuple[object, ...] = cast(tuple[object, ...], r)
+                isin_str = str(r_t[0])
+                wt_a = float(cast(float, r_t[1]))
+                wt_b = float(cast(float, r_t[2]))
+                ov_val = float(cast(float, r_t[3]))
+                total_overlap += ov_val
+                common_items.append(
+                    {
+                        "isin": isin_str,
+                        "weight_a": round(wt_a, 2),
+                        "weight_b": round(wt_b, 2),
+                        "overlap": round(ov_val, 2),
+                    }
+                )
+
             return {
                 "scheme_a": scheme_a,
                 "scheme_b": scheme_b,
                 "overlap_pct": round(total_overlap, 2),
                 "common_holdings_count": len(rows),
-                "common_holdings": [
-                    {
-                        "isin": r[0],
-                        "weight_a": round(r[1], 2),
-                        "weight_b": round(r[2], 2),
-                        "overlap": round(r[3], 2),
-                    }
-                    for r in rows
-                ],
+                "common_holdings": common_items,
             }
         finally:
             con.close()
@@ -490,7 +513,7 @@ class DuckDbMutualFundsStore:
         asof_date: dt.date | None = None,
         min_pct_aum: float = 0.0,
         equity_db_path: Path | str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, object]]:
         """Institutional reverse lookup: Find all funds holding a given equity symbol or ISIN."""
         if equity_db_path is None:
             data_root = find_data_root()
@@ -504,8 +527,8 @@ class DuckDbMutualFundsStore:
                 "SELECT isin_code FROM companies WHERE symbol = ?", [symbol_or_isin.upper()]
             ).fetchone()
             eq_con.close()
-            if res and res[0]:
-                resolved_isin = res[0]
+            if res and res[0] is not None:
+                resolved_isin = str(cast(object, res[0]))
 
         con = duckdb.connect(str(self.db_path))
         try:
@@ -530,12 +553,12 @@ class DuckDbMutualFundsStore:
             rows = con.execute(query, [resolved_isin, min_pct_aum, asof_str]).fetchall()
             return [
                 {
-                    "scheme_code": r[0],
-                    "scheme_name": r[1],
-                    "category": r[2],
-                    "plan": r[3],
-                    "pct_aum": float(r[4]),
-                    "market_value_cr": float(r[5]),
+                    "scheme_code": str(r[0]),
+                    "scheme_name": str(r[1]),
+                    "category": str(r[2]),
+                    "plan": str(r[3]),
+                    "pct_aum": float(cast(float, r[4])),
+                    "market_value_cr": float(cast(float, r[5])),
                     "report_date": str(r[6]),
                     "isin": resolved_isin,
                 }
@@ -665,7 +688,12 @@ class DuckDbMutualFundsStore:
                 pct_aum=7.2,
             ),
             FundHolding(
-                dt.date(2026, 9, 30), "122639", "INE009A01021", "Infosys Ltd", "Equity", pct_aum=6.8
+                dt.date(2026, 9, 30),
+                "122639",
+                "INE009A01021",
+                "Infosys Ltd",
+                "Equity",
+                pct_aum=6.8,
             ),
             FundHolding(
                 dt.date(2026, 9, 30),
@@ -709,7 +737,12 @@ class DuckDbMutualFundsStore:
                 pct_aum=5.8,
             ),
             FundHolding(
-                dt.date(2026, 9, 30), "118989", "INE009A01021", "Infosys Ltd", "Equity", pct_aum=4.5
+                dt.date(2026, 9, 30),
+                "118989",
+                "INE009A01021",
+                "Infosys Ltd",
+                "Equity",
+                pct_aum=4.5,
             ),
             FundHolding(
                 dt.date(2026, 9, 30),
@@ -729,7 +762,12 @@ class DuckDbMutualFundsStore:
                 pct_aum=9.8,
             ),
             FundHolding(
-                dt.date(2026, 9, 30), "125354", "INE118H01025", "BSE Ltd", "Equity", pct_aum=6.2
+                dt.date(2026, 9, 30),
+                "125354",
+                "INE118H01025",
+                "BSE Ltd",
+                "Equity",
+                pct_aum=6.2,
             ),
             FundHolding(
                 dt.date(2026, 9, 30),
@@ -765,7 +803,12 @@ class DuckDbMutualFundsStore:
                 pct_aum=8.4,
             ),
             FundHolding(
-                dt.date(2026, 9, 30), "120503", "INE009A01021", "Infosys Ltd", "Equity", pct_aum=7.9
+                dt.date(2026, 9, 30),
+                "120503",
+                "INE009A01021",
+                "Infosys Ltd",
+                "Equity",
+                pct_aum=7.9,
             ),
             FundHolding(
                 dt.date(2026, 9, 30),
@@ -801,7 +844,12 @@ class DuckDbMutualFundsStore:
                 pct_aum=6.4,
             ),
             FundHolding(
-                dt.date(2026, 9, 30), "118834", "INE118H01025", "BSE Ltd", "Equity", pct_aum=4.2
+                dt.date(2026, 9, 30),
+                "118834",
+                "INE118H01025",
+                "BSE Ltd",
+                "Equity",
+                pct_aum=4.2,
             ),
             FundHolding(
                 dt.date(2026, 9, 30),
@@ -813,7 +861,12 @@ class DuckDbMutualFundsStore:
             ),
             # Nippon Small Cap (118778)
             FundHolding(
-                dt.date(2026, 9, 30), "118778", "INE118H01025", "BSE Ltd", "Equity", pct_aum=4.8
+                dt.date(2026, 9, 30),
+                "118778",
+                "INE118H01025",
+                "BSE Ltd",
+                "Equity",
+                pct_aum=4.8,
             ),
             FundHolding(
                 dt.date(2026, 9, 30),
@@ -833,7 +886,12 @@ class DuckDbMutualFundsStore:
                 pct_aum=5.1,
             ),
             FundHolding(
-                dt.date(2026, 9, 30), "120828", "INE118H01025", "BSE Ltd", "Equity", pct_aum=4.5
+                dt.date(2026, 9, 30),
+                "120828",
+                "INE118H01025",
+                "BSE Ltd",
+                "Equity",
+                pct_aum=4.5,
             ),
         ]
         self.upsert_holdings(holdings)
