@@ -827,6 +827,8 @@ class DuckDbMutualFundsStore:
                 pct_aum=4.9,
             ),
             # Mirae Asset Large & Midcap (118834)
+            # Large Cap: HDFCBANK (7.8%), RELIANCE (6.4%) -> 14.2%
+            # Mid Cap: FEDERALBNK (4.5%), COFORGE (4.2%), BHARATFORG (3.8%) -> 12.5%
             FundHolding(
                 dt.date(2026, 9, 30),
                 "118834",
@@ -846,18 +848,26 @@ class DuckDbMutualFundsStore:
             FundHolding(
                 dt.date(2026, 9, 30),
                 "118834",
-                "INE118H01025",
-                "BSE Ltd",
+                "INE171A01029",
+                "Federal Bank Ltd",
+                "Equity",
+                pct_aum=4.5,
+            ),
+            FundHolding(
+                dt.date(2026, 9, 30),
+                "118834",
+                "INE591G01025",
+                "Coforge Ltd",
                 "Equity",
                 pct_aum=4.2,
             ),
             FundHolding(
                 dt.date(2026, 9, 30),
                 "118834",
-                "INE117A01022",
-                "ABB India Ltd",
+                "INE465A01025",
+                "Bharat Forge Ltd",
                 "Equity",
-                pct_aum=3.9,
+                pct_aum=3.8,
             ),
             # Nippon Small Cap (118778)
             FundHolding(
