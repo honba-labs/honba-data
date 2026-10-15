@@ -313,12 +313,16 @@ class DuckDbFundamentalsStore:
                 "SELECT count(*) FROM companies WHERE cap_category='LARGE_CAP'"
             )
             mid_count = _fetch_scalar("SELECT count(*) FROM companies WHERE cap_category='MID_CAP'")
+            small_count = _fetch_scalar(
+                "SELECT count(*) FROM companies WHERE cap_category='SMALL_CAP'"
+            )
 
         return {
             "db_path": str(self.db_path),
             "companies_total": comp_count,
             "large_cap_companies": large_count,
             "mid_cap_companies": mid_count,
+            "small_cap_companies": small_count,
             "statements_records": stmt_count,
             "ratios_records": ratio_count,
             "screener_facts": facts_count,

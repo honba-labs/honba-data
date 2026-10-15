@@ -48,7 +48,7 @@ def test_universe_completeness(db_conn: duckdb.DuckDBPyConnection) -> None:
     large_comps = r_large[0] if r_large else 0
     mid_comps = r_mid[0] if r_mid else 0
 
-    assert total_comps == 250, f"Expected 250 companies, found {total_comps}"
+    assert total_comps >= 250, f"Expected at least 250 companies, found {total_comps}"
     assert large_comps == 100, f"Expected 100 Large-Cap companies, found {large_comps}"
     assert mid_comps == 150, f"Expected 150 Mid-Cap companies, found {mid_comps}"
 

@@ -37,6 +37,9 @@ NSE_NIFTY_100_URL = "https://archives.nseindia.com/content/indices/ind_nifty100l
 NSE_NIFTY_MIDCAP_150_URL = (
     "https://archives.nseindia.com/content/indices/ind_niftymidcap150list.csv"
 )
+NSE_NIFTY_SMALLCAP_250_URL = (
+    "https://niftyindices.com/IndexConstituent/ind_niftysmallcap250list.csv"
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -48,8 +51,8 @@ class CompanyMetadata:
     industry: str
     series: str
     isin_code: str
-    cap_category: str  # "LARGE_CAP" | "MID_CAP"
-    index_name: str  # "NIFTY 100" | "NIFTY MIDCAP 150"
+    cap_category: str  # "LARGE_CAP" | "MID_CAP" | "SMALL_CAP"
+    index_name: str  # "NIFTY 100" | "NIFTY MIDCAP 150" | "NIFTY SMALLCAP 250"
 
 
 def _to_float(v: object) -> float | None:
@@ -113,6 +116,12 @@ def fetch_large_midcap_universe(category: str = "ALL") -> list[CompanyMetadata]:
             results.extend(_load_csv(NSE_NIFTY_MIDCAP_150_URL, "MID_CAP", "NIFTY MIDCAP 150"))
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
             logger.warning(f"Failed to fetch Nifty Midcap 150 list from NSE: {e}")
+
+    if category_norm in ("SMALL_CAP", "SMALL", "ALL"):
+        try:
+            results.extend(_load_csv(NSE_NIFTY_SMALLCAP_250_URL, "SMALL_CAP", "NIFTY SMALLCAP 250"))
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+            logger.warning(f"Failed to fetch Nifty Smallcap 250 list: {e}")
 
     # Deduplicate by symbol preserving order
     seen: set[str] = set()
