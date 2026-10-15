@@ -46,3 +46,6 @@ bhavcopy/
 journals/
 output/
 tmp/
+
+# uv lockfile: not tracked in any honba repo
+uv.lock
