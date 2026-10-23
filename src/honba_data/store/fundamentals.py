@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import datetime as dt
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import duckdb
+import pandas as pd
 
 DATA_DIR_ENV = "HONBA_DATA_DIR"
 
@@ -63,6 +64,10 @@ class DuckDbFundamentalsStore:
     def _get_connection(self) -> duckdb.DuckDBPyConnection:
         return duckdb.connect(str(self.db_path))
 
+    def get_connection(self) -> duckdb.DuckDBPyConnection:
+        """Provide a connection context for querying or transactions."""
+        return self._get_connection()
+
     def get_existing_symbols(self) -> set[str]:
         """Return the set of company symbols already persisted in DuckDB."""
         with self._get_connection() as con:
@@ -95,25 +100,37 @@ class DuckDbFundamentalsStore:
             """)
 
             # 2. Financial statements line items (Income, Balance Sheet, Cash Flow)
+            # Supports point-in-time filing_date (announcement date) vs period_end_date
             _ = con.execute("""
                 CREATE TABLE IF NOT EXISTS financial_statements (
                     symbol VARCHAR,
                     period_type VARCHAR,
                     statement_type VARCHAR,
                     fiscal_date DATE,
+                    period_end_date DATE,
+                    filing_date DATE,
                     line_item VARCHAR,
                     value DOUBLE,
                     currency VARCHAR DEFAULT 'INR',
                     PRIMARY KEY (symbol, period_type, statement_type, fiscal_date, line_item)
                 );
             """)
+            _ = con.execute(
+                "ALTER TABLE financial_statements ADD COLUMN IF NOT EXISTS period_end_date DATE;"
+            )
+            _ = con.execute(
+                "ALTER TABLE financial_statements ADD COLUMN IF NOT EXISTS filing_date DATE;"
+            )
 
             # 3. Standardized financial ratios per fiscal date
+            # Supports point-in-time filing_date (announcement date) vs period_end_date
             _ = con.execute("""
                 CREATE TABLE IF NOT EXISTS financial_ratios (
                     symbol VARCHAR,
                     period_type VARCHAR,
                     fiscal_date DATE,
+                    period_end_date DATE,
+                    filing_date DATE,
                     revenue DOUBLE,
                     ebitda DOUBLE,
                     ebit DOUBLE,
@@ -135,6 +152,12 @@ class DuckDbFundamentalsStore:
                     PRIMARY KEY (symbol, period_type, fiscal_date)
                 );
             """)
+            _ = con.execute(
+                "ALTER TABLE financial_ratios ADD COLUMN IF NOT EXISTS period_end_date DATE;"
+            )
+            _ = con.execute(
+                "ALTER TABLE financial_ratios ADD COLUMN IF NOT EXISTS filing_date DATE;"
+            )
 
             # 4. Canonical Honba screener facts table (Design.md Section 14.3)
             _ = con.execute("""
@@ -186,8 +209,8 @@ class DuckDbFundamentalsStore:
 
     def save_company_data(
         self,
-        company_meta: dict[str, object],
-        statements: Sequence[tuple[str, str, str, str, str, float]],
+        company_meta: Mapping[str, object],
+        statements: Sequence[tuple[object, ...]],
         ratios: Sequence[tuple[object, ...]],
         metrics: Sequence[tuple[object, ...]],
     ) -> None:
@@ -232,30 +255,54 @@ class DuckDbFundamentalsStore:
                 ],
             )
 
-            # Insert/replace statements
+            # Insert/replace statements with point-in-time filing_date support
             if statements:
+                norm_stmts = []
+                for s in statements:
+                    if len(s) == 6:
+                        norm_stmts.append((s[0], s[1], s[2], s[3], s[3], s[3], s[4], s[5]))
+                    elif len(s) == 7:
+                        norm_stmts.append((s[0], s[1], s[2], s[3], s[3], s[4], s[5], s[6]))
+                    elif len(s) >= 8:
+                        norm_stmts.append((s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]))
+
                 _ = con.executemany(
                     """
                     INSERT INTO financial_statements (
-                        symbol, period_type, statement_type, fiscal_date, line_item, value
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        symbol, period_type, statement_type, fiscal_date, period_end_date, filing_date, line_item, value
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (symbol, period_type, statement_type, fiscal_date, line_item)
-                    DO UPDATE SET value=excluded.value;
+                    DO UPDATE SET
+                        period_end_date=excluded.period_end_date,
+                        filing_date=excluded.filing_date,
+                        value=excluded.value;
                     """,
-                    statements,
+                    norm_stmts,
                 )
 
-            # Insert/replace ratios
+            # Insert/replace ratios with point-in-time filing_date support
             if ratios:
+                norm_ratios = []
+                for r in ratios:
+                    if len(r) == 21:
+                        norm_ratios.append((r[0], r[1], r[2], r[2], r[2], *r[3:]))
+                    elif len(r) == 22:
+                        norm_ratios.append((r[0], r[1], r[2], r[2], r[3], *r[4:]))
+                    elif len(r) >= 23:
+                        norm_ratios.append(r[:23])
+
                 _ = con.executemany(
                     """
                     INSERT INTO financial_ratios (
-                        symbol, period_type, fiscal_date, revenue, ebitda, ebit, net_income,
-                        total_assets, current_liabilities, capital_employed, stockholders_equity,
-                        total_debt, cash_and_equivalents, operating_cash_flow, free_cash_flow,
-                        roce_pct, roe_pct, operating_margin_pct, net_margin_pct, debt_to_equity, eps
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        symbol, period_type, fiscal_date, period_end_date, filing_date,
+                        revenue, ebitda, ebit, net_income, total_assets, current_liabilities,
+                        capital_employed, stockholders_equity, total_debt, cash_and_equivalents,
+                        operating_cash_flow, free_cash_flow, roce_pct, roe_pct,
+                        operating_margin_pct, net_margin_pct, debt_to_equity, eps
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (symbol, period_type, fiscal_date) DO UPDATE SET
+                        period_end_date=excluded.period_end_date,
+                        filing_date=excluded.filing_date,
                         revenue=excluded.revenue,
                         ebitda=excluded.ebitda,
                         ebit=excluded.ebit,
@@ -275,7 +322,7 @@ class DuckDbFundamentalsStore:
                         debt_to_equity=excluded.debt_to_equity,
                         eps=excluded.eps;
                     """,
-                    ratios,
+                    norm_ratios,
                 )
 
             # Insert/replace screener metrics facts
@@ -292,6 +339,148 @@ class DuckDbFundamentalsStore:
                     """,
                     metrics,
                 )
+
+    def query_point_in_time_ratios(
+        self,
+        as_of_date: dt.date | str,
+        symbols: Sequence[str] | None = None,
+        period_type: str = "FY",
+    ) -> list[dict[str, Any]]:
+        """Point-in-time query for financial ratios strictly filed on or before ``as_of_date``.
+
+        Eliminates look-ahead bias by filtering on ``COALESCE(filing_date, fiscal_date) <= as_of_date``
+        and selecting the latest available filing for each company as of that date.
+        """
+        as_of_str = str(as_of_date)
+        sym_clause = ""
+        params: list[Any] = [as_of_str, period_type]
+
+        if symbols is not None and len(symbols) > 0:
+            placeholders = ", ".join(["?"] * len(symbols))
+            sym_clause = f"AND symbol IN ({placeholders})"
+            params.extend(symbols)
+
+        query = f"""
+            WITH ranked AS (
+                SELECT *,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY symbol
+                           ORDER BY COALESCE(filing_date, fiscal_date) DESC, fiscal_date DESC
+                       ) as rn
+                FROM financial_ratios
+                WHERE COALESCE(filing_date, fiscal_date) <= ?
+                  AND period_type = ?
+                  {sym_clause}
+            )
+            SELECT * EXCLUDE (rn)
+            FROM ranked
+            WHERE rn = 1
+            ORDER BY symbol;
+        """
+        with self._get_connection() as con:
+            df = con.execute(query, params).df()
+            for col in ["fiscal_date", "period_end_date", "filing_date"]:
+                if col in df.columns:
+                    df[col] = df[col].apply(
+                        lambda v: (
+                            v.date() if hasattr(v, "date") and callable(getattr(v, "date")) else v
+                        )
+                    )
+            return cast(list[dict[str, Any]], df.to_dict(orient="records"))
+
+    def query_point_in_time_statements(
+        self,
+        as_of_date: dt.date | str,
+        statement_type: str | None = None,
+        symbols: Sequence[str] | None = None,
+        period_type: str = "FY",
+    ) -> list[dict[str, Any]]:
+        """Point-in-time query for statement line items filed on or before ``as_of_date``."""
+        as_of_str = str(as_of_date)
+        stmt_clause = ""
+        params: list[Any] = [as_of_str, period_type]
+
+        if statement_type:
+            stmt_clause = "AND statement_type = ?"
+            params.append(statement_type)
+
+        sym_clause = ""
+        if symbols is not None and len(symbols) > 0:
+            placeholders = ", ".join(["?"] * len(symbols))
+            sym_clause = f"AND symbol IN ({placeholders})"
+            params.extend(symbols)
+
+        query = f"""
+            WITH ranked AS (
+                SELECT *,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY symbol, statement_type, line_item
+                           ORDER BY COALESCE(filing_date, fiscal_date) DESC, fiscal_date DESC
+                       ) as rn
+                FROM financial_statements
+                WHERE COALESCE(filing_date, fiscal_date) <= ?
+                  AND period_type = ?
+                  {stmt_clause}
+                  {sym_clause}
+            )
+            SELECT * EXCLUDE (rn)
+            FROM ranked
+            WHERE rn = 1
+            ORDER BY symbol, statement_type, line_item;
+        """
+        with self._get_connection() as con:
+            df = con.execute(query, params).df()
+            for col in ["fiscal_date", "period_end_date", "filing_date"]:
+                if col in df.columns:
+                    df[col] = df[col].apply(
+                        lambda v: (
+                            v.date() if hasattr(v, "date") and callable(getattr(v, "date")) else v
+                        )
+                    )
+            return cast(list[dict[str, Any]], df.to_dict(orient="records"))
+
+    def as_of_join_prices_and_fundamentals(
+        self,
+        prices_df: pd.DataFrame,
+        period_type: str = "FY",
+    ) -> pd.DataFrame:
+        """Perform a point-in-time ASOF JOIN between price bars and financial ratios.
+
+        Guarantees that each price bar on ``bar_date`` receives only fundamentals
+        published on or prior to that date (``p.bar_date >= r.filing_date``).
+        """
+        with self._get_connection() as con:
+            con.register("prices_input", prices_df)
+            query = """
+                SELECT
+                    p.*,
+                    r.period_type AS fund_period_type,
+                    r.fiscal_date AS fund_fiscal_date,
+                    r.filing_date AS fund_filing_date,
+                    r.revenue,
+                    r.ebitda,
+                    r.net_income,
+                    r.roce_pct,
+                    r.roe_pct,
+                    r.debt_to_equity,
+                    r.eps
+                FROM prices_input p
+                ASOF LEFT JOIN (
+                    SELECT * FROM financial_ratios
+                    WHERE period_type = ?
+                ) r
+                ON p.symbol = r.symbol AND p.bar_date >= COALESCE(r.filing_date, r.fiscal_date)
+                ORDER BY p.symbol, p.bar_date;
+            """
+            res = con.execute(query, [period_type]).df()
+            for col in ["bar_date", "fund_fiscal_date", "fund_filing_date"]:
+                if col in res.columns:
+                    res[col] = res[col].apply(
+                        lambda v: (
+                            v.date() if hasattr(v, "date") and callable(getattr(v, "date")) else v
+                        )
+                    )
+            return res
 
     def get_summary(self) -> dict[str, str | int | None]:
         """Return dataset counts and inventory statistics."""

@@ -13,7 +13,7 @@ def test_duckdb_fundamentals_store_init_and_schema() -> None:
         db_path = Path(tmp_dir) / "test.duckdb"
         store = DuckDbFundamentalsStore(db_path=db_path)
 
-        with store._get_connection() as con:
+        with store.get_connection() as con:
             tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
             assert "companies" in tables
             assert "financial_statements" in tables
@@ -116,7 +116,7 @@ def test_duckdb_fundamentals_save_and_query() -> None:
         assert summary["screener_facts"] == 2
         assert summary["min_fiscal_date"] == "2025-03-31"
 
-        with store._get_connection() as con:
+        with store.get_connection() as con:
             row = con.execute(
                 "SELECT roce_pct, roe_pct, debt_to_equity FROM financial_ratios WHERE symbol='TESTCO'"
             ).fetchone()

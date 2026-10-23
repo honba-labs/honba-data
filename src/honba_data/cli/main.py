@@ -5,12 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
+import pandas as pd
 import typer
 from rich.console import Console
 from rich.table import Table
 
+from honba_data.coverage.data_quality import DataQualityChecker
 from honba_data.live.cli import live_app
 from honba_data.providers.fundamentals import download_fundamentals_to_duckdb
+from honba_data.store.corporate_actions import DuckDbCorporateActionsStore
 from honba_data.store.fundamentals import DuckDbFundamentalsStore, find_data_root
 
 app = typer.Typer(
@@ -95,6 +98,86 @@ def summary_cmd(
     table.add_row("Fiscal Date Coverage", f"{s['min_fiscal_date']} → {s['max_fiscal_date']}")
 
     console.print(table)
+
+
+@app.command("corporate-actions")
+def actions_cmd(
+    symbol: Annotated[
+        str | None,
+        typer.Option("--symbol", "-s", help="Filter by symbol"),
+    ] = None,
+    action_type: Annotated[
+        str | None,
+        typer.Option("--type", "-t", help="Filter by action type: SPLIT, BONUS, DIVIDEND"),
+    ] = None,
+    db_path: Annotated[
+        str | None,
+        typer.Option("--db-path", help="Custom DuckDB destination path"),
+    ] = None,
+) -> None:
+    """List recorded corporate actions and adjustment factors."""
+    dest = Path(db_path) if db_path else find_data_root() / "fundamentals.duckdb"
+    store = DuckDbCorporateActionsStore(db_path=dest)
+    actions = store.get_actions(symbol=symbol, action_type=action_type)
+
+    table = Table(title="Corporate Actions Ledger", header_style="bold cyan")
+    table.add_column("Symbol", style="magenta")
+    table.add_column("Action", style="green")
+    table.add_column("Ex-Date", style="yellow")
+    table.add_column("Ratio (New:Old)", style="white")
+    table.add_column("Dividend", style="cyan")
+    table.add_column("Adj Factor", style="bold red")
+    table.add_column("Remarks", style="dim")
+
+    for a in actions:
+        ratio = f"{a['ratio_numerator']}:{a['ratio_denominator']}" if a["ratio_numerator"] else "-"
+        div = f"₹{a['dividend_amount']:.2f}" if a["dividend_amount"] is not None else "-"
+        factor = f"{a['adjustment_factor']:.4f}" if a["adjustment_factor"] is not None else "-"
+        table.add_row(
+            a["symbol"],
+            a["action_type"],
+            str(a["ex_date"]),
+            ratio,
+            div,
+            factor,
+            a.get("remarks") or "",
+        )
+
+    console.print(table)
+
+
+@app.command("quality")
+def quality_cmd(
+    parquet_path: Annotated[
+        str,
+        typer.Argument(help="Path to Parquet bar file or CSV to validate"),
+    ],
+    interval: Annotated[
+        str,
+        typer.Option("--interval", "-i", help="Bar interval (e.g. 1D, 1h, 5m)"),
+    ] = "1D",
+) -> None:
+    """Run automated data quality and coverage audit on OHLCV market data."""
+    p = Path(parquet_path)
+    if not p.is_file():
+        err_console.print(f"[red]File not found: {p}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(f"[bold cyan]Auditing data quality for {p}...[/bold cyan]")
+    if p.suffix == ".parquet":
+        df = pd.read_parquet(p)
+    else:
+        df = pd.read_csv(p)
+
+    checker = DataQualityChecker()
+    report = checker.check_bars(df, interval=interval)
+
+    console.print(report.to_table())
+    s = report.summary()
+    status_color = "green" if report.is_clean else "yellow"
+    console.print(
+        f"[{status_color}]Result: {s['clean_records']}/{s['total_records']} clean bars ({s['clean_pct']}%), {s['issue_count']} quality issues detected.[/{status_color}]"
+    )
 
 
 if __name__ == "__main__":

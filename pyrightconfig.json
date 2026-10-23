@@ -1,6 +1,6 @@
 {
   "include": ["src", "scripts", "tests"],
   "extraPaths": ["src"],
-  "venvPath": "/home/pmallapp/Devel/Finance/honba-labs",
+  "venvPath": ".",
   "venv": ".venv"
 }
