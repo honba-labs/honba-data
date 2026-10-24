@@ -24,9 +24,9 @@ An in-depth architectural audit of `honba-data` reveals seven acute and severe s
 ## 1. Architectural Scope & Bounded Contexts
 
 ```text
-┌────────────────────────────────────────────────────────────────────────────────────────┐
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
 │                                honba Platform Topology                                 │
-│                                                                                        │
+│                                                                                         │
 │   ┌─────────────────────────────────────────┐    ┌─────────────────────────────────┐   │
 │   │           honba-me (Market Eye)         │    │    honba-data (Lakehouse)       │   │
 │   │  - Live WebSocket Feeds (NSE/BSE/NFO)   │    │  - Corporate Financial Filings  │   │
@@ -34,15 +34,15 @@ An in-depth architectural audit of `honba-data` reveals seven acute and severe s
 │   │  - Hive Parquet (Decimal128 Exact)      │    │  - Financial Ratios (ROCE, ROE) │   │
 │   │  - NSE Bhavcopy Market Ingestion        │    │  - Corporate Actions & Audits   │   │
 │   │  - Real-time Technical Indicators       │    │  - Coverage Ledger & PIT Engine │   │
-│   └───────────────────┬─────────────────────┘    └────────────────┬────────────────┘   │
+│   └────────────────────┬────────────────────┘    └────────────────┬────────────────┘   │
 │                       │ Arrow Flight / IPC                        │ Service / DuckDB   │
 │                       ▼                                           ▼                    │
-│   ┌────────────────────────────────────────────────────────────────────────────────┐   │
-│   │                honba-ya / honba-tamashii / honba-strategies                    │   │
-│   │  - Algorithmic Trading Engines & Multi-Horizon Strategy Screeners              │   │
-│   │  - Fundamental + Technical Confluence Alpha Models                            │   │
-│   └────────────────────────────────────────────────────────────────────────────────┘   │
-└────────────────────────────────────────────────────────────────────────────────────────┘
+│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│   │                honba-ya / honba-tamashii / honba-strategies                     │   │
+│   │  - Algorithmic Trading Engines & Multi-Horizon Strategy Screeners               │   │
+│   │  - Fundamental + Technical Confluence Alpha Models                             │   │
+│   └─────────────────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 1.1 Separation of Concerns: `honba-data` vs `honba-me`
@@ -94,6 +94,7 @@ honba-data/
         │   │   ├── corporate.py       # DuckDbCorporateActionsStore
         │   │   └── schema.py          # DDL migrations and schema versioning
         │   ├── ledger/
+        │   │   ├── __init__.py
         │   │   └── json_ledger.py     # JsonCoverageRepository (implements CoverageRepository)
         │   └── providers/
         │       ├── nse_filings.py     # Official NSE/BSE corporate filings adapter
@@ -137,9 +138,9 @@ Downstream consumers (such as the strategy screener or signal engine) subscribe 
   - Added comprehensive unit tests in `tests/unit/test_domain_models.py` and `tests/unit/test_parquet_store.py`.
   - Verified package installation, zero Pyright diagnostics, clean Ruff formatting/linting, and 100% test pass (57/57 passed).
 
-### Phase 2: Interface-First `DataService` & Tactical DDD Repositories (P0)
-- [ ] **2.1 Define Hexagonal Port Protocols (`ports/`)**
-  - Define object-safe typing protocols in `ports/`:
+### Phase 2: Interface-First `DataService` & Tactical DDD Repositories (P0) — COMPLETED
+- [x] **2.1 Define Hexagonal Port Protocols (`ports/`)**
+  - Defined object-safe typing protocols in `src/honba_data/ports/`:
     - `DataService`:
       ```python
       class DataService(Protocol):
@@ -148,28 +149,41 @@ Downstream consumers (such as the strategy screener or signal engine) subscribe 
               self, symbol: str, as_of: dt.date | None = None
           ) -> Sequence[FinancialRatios]: ...
           def get_bars(
-              self, instrument: InstrumentId, timeframe: str, interval: DateInterval
-          ) -> Sequence[Bar]: ...
-          def coverage(self, instrument: InstrumentId, timeframe: str) -> Sequence[CoverageRecord]: ...
+              self,
+              instrument: InstrumentIdProtocol | InstrumentId | Any,
+              timeframe: str,
+              interval: DateInterval,
+          ) -> Sequence[BarProtocol | Bar]: ...
+          def coverage(
+              self, instrument: InstrumentIdProtocol | InstrumentId | Any, timeframe: str
+          ) -> Sequence[CoverageRecord]: ...
       ```
-    - `FundamentalsRepository`: `save_statements()`, `find_by_symbol()`, `query_point_in_time()`.
-    - `CoverageRepository`: `load_records()`, `update_interval()`, `detect_gaps()`.
-- [ ] **2.2 Refactor DuckDB Storage into Ports/Adapters**
-  - Move schema creation and raw SQL execution from transaction script into `adapters/duckdb/store.py` implementing `FundamentalsRepository`.
-  - Ensure DuckDB connection lifecycle is robust, supporting both file-backed and `:memory:` connections for hermetic testing.
-- [ ] **2.3 Implement Canonical `DataServiceImpl` (`service/service.py`)**
-  - Implement `DataServiceImpl` injecting `FundamentalsRepository`, `CoverageRepository`, and optional market data delegates.
-  - For market data methods (`get_bars`), delegate to `honba-me`'s Arrow/Parquet reader or raise explicit, actionable `NotImplementedError` rather than silently returning empty collections.
+    - `FundamentalsRepository`: `save_company()`, `save_statements()`, `save_ratios()`, `find_by_symbol()`, `find_ratios_by_symbol()`, `query_point_in_time()`, `query_point_in_time_statements()`.
+    - `CoverageRepository`: `load_records()`, `update_interval()`, `detect_gaps()`, `append_record()`.
+    - `FundamentalsProvider`: `fetch_company()`, `fetch_statements()`, `fetch_ratios()`.
+- [x] **2.2 Refactor DuckDB Storage into Ports/Adapters**
+  - Migrated schema creation, DDL migrations, and table versioning into `adapters/duckdb/schema.py`.
+  - Implemented `FundamentalsRepository` protocol in `adapters/duckdb/store.py` (`DuckDbFundamentalsStore`), supporting both file-backed and `:memory:` connections for hermetic unit testing.
+  - Added domain event publishing on statement/ratio ingestion (`FundamentalsIngested`).
+  - Re-exported backward-compatible facades in `store/fundamentals.py` and `store/corporate_actions.py`.
+- [x] **2.3 Implement Canonical `DataServiceImpl` (`service/service.py`)**
+  - Implemented `DataServiceImpl` coordinating `FundamentalsRepository`, `CoverageRepository`, and market data delegates.
+  - Added strict delegation semantics: for `get_bars`, delegates to the configured market data store or raises an actionable `NotImplementedError` when unconfigured.
+  - Added comprehensive test suites in `tests/unit/test_data_service.py` and `tests/unit/test_duckdb_repo.py`.
 
-### Phase 3: Market Data Ownership Resolution & Lakehouse Convergence (P1)
-- [ ] **3.1 Parquet Lakehouse Alignment with `honba-me`**
-  - Audit `store/parquet.py`: Replace raw float64 bar schema with canonical `honba-core` Bar semantics or delegate directly to `honba-me-feed`.
-  - If retained as a local offline cache, align partition hierarchy to Hive standard:
-    `catalog/timeframe=1D/exchange=NSE/symbol=RELIANCE/year=2025.parquet`
-  - Ensure bar timestamps are strictly UTC nanoseconds and low <= open/close <= high invariants are strictly validated.
-- [ ] **3.2 Coverage Ledger Monotonicity**
-  - Replace raw JSON file rewriting with an atomic `CoverageRepository` adapter supporting transactional `.tmp -> replace` semantics and checksums.
-  - Implement coverage interval algebra (`union`, `difference`, `gap_fill`) ensuring non-overlapping canonical intervals.
+### Phase 3: Market Data Ownership Resolution & Lakehouse Convergence (P1) — COMPLETED
+- [x] **3.1 Parquet Lakehouse Alignment with `honba-me`**
+  - Upgraded `ParquetBarStore` to support canonical Hive partition hierarchy:
+    `catalog/timeframe=1D/exchange=NSE/symbol=RELIANCE/year=2025.parquet`.
+  - Transparent fallback reading from legacy directory layout (`catalog/1D/NSE/RELIANCE/2025.parquet`).
+  - Strict UTC integer nanosecond timestamp verification and OHLCV price/volume invariant validation (`validate_bar`).
+  - Added test suite in `tests/unit/test_parquet_hive.py`.
+- [x] **3.2 Coverage Ledger Monotonicity**
+  - Implemented `JsonCoverageRepository` in `adapters/ledger/json_ledger.py` adhering to `CoverageRepository`.
+  - Implemented transactional `.tmp -> replace` atomic writes with deterministic SHA-256 interval checksums (`compute_interval_checksum`).
+  - Integrated canonical half-open date interval algebra (`union`, `difference`, `gap_fill`) ensuring non-overlapping canonical intervals.
+  - Integrated domain event publication (`CoverageLedgerUpdated`).
+  - Added unit test suite in `tests/unit/test_json_ledger.py`.
 
 ### Phase 4: TDD Rigor, Invariant Enforcement & Property-Based Testing (P1)
 - [ ] **4.1 Property-Based Interval Algebra Tests (`Hypothesis`)**
@@ -196,15 +210,15 @@ Downstream consumers (such as the strategy screener or signal engine) subscribe 
   - Define structured ingestion event schema:
     ```json
     {
-      \"timestamp\": \"2026-10-24T13:45:00Z\",
-      \"event\": \"ingestion_completed\",
-      \"universe\": \"NIFTY_100\",
-      \"symbols_attempted\": 100,
-      \"symbols_succeeded\": 100,
-      \"symbols_failed\": 0,
-      \"rows_written\": 2450,
-      \"coverage_delta_days\": 365,
-      \"duration_seconds\": 18.4
+      "timestamp": "2026-10-24T13:45:00Z",
+      "event": "ingestion_completed",
+      "universe": "NIFTY_100",
+      "symbols_attempted": 100,
+      "symbols_succeeded": 100,
+      "symbols_failed": 0,
+      "rows_written": 2450,
+      "coverage_delta_days": 365,
+      "duration_seconds": 18.4
     }
     ```
 - [ ] **5.3 Lakehouse Health Status CLI (`honba-data status`)**
@@ -220,10 +234,10 @@ Downstream consumers (such as the strategy screener or signal engine) subscribe 
 | Area | Current State | Required Target Change | Phase |
 | :--- | :--- | :--- | :--- |
 | **Dependency Contract** | Implicit unpinned import of `honba.domain` | Self-contained domain models and protocols (`Bar`, `InstrumentId`); zero upward dependency | **Phase 1 (Done)** |
-| **Service Contract** | README promises `DataService`, none implemented | Create `DataService` protocol in `ports/service.py`; implement in `service/service.py` | **Phase 2** |
-| **Tactical DDD** | Concrete DuckDB SQL script directly in store | `FundamentalsRepository` & `CoverageRepository` protocols; move SQL to `adapters/` | **Phase 2** |
+| **Service Contract** | README promises `DataService`, none implemented | Create `DataService` protocol in `ports/service.py`; implement in `service/service.py` | **Phase 2 (Done)** |
+| **Tactical DDD** | Concrete DuckDB SQL script directly in store | `FundamentalsRepository` & `CoverageRepository` protocols; move SQL to `adapters/` | **Phase 2 (Done)** |
 | **Domain Events** | No events; polling required | Introduce `FundamentalsIngested`, `CoverageLedgerUpdated`, `DataQualityAlertRaised` | **Phase 1 (Done)** |
-| **Parquet Lakehouse** | Incomplete stub with `f64` bars & JSON ledger | Delegate market data to `honba-me` or align schema with Hive `Decimal128` | **Phase 3** |
+| **Parquet Lakehouse** | Incomplete stub with `f64` bars & JSON ledger | Delegate market data to `honba-me` or align schema with Hive `Decimal128` | **Phase 3 (Done)** |
 | **TDD & Invariants** | Basic DuckDB schema tests; ad-hoc yfinance test | Property-based tests (`Hypothesis`) for coverage algebra & strict point-in-time queries | **Phase 4** |
 | **Concurrency Model** | Ad-hoc `ThreadPoolExecutor` & polling thread | Isolate as batch/offline lakehouse; bounded backpressure; zero live actor stalling | **Phase 5** |
 | **Observability** | Only basic `logging.getLogger` | Structured JSON ingestion telemetry + `honba-data status` CLI command | **Phase 5** |

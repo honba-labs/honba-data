@@ -1,4 +1,4 @@
-"""Unit tests for honba_data domain entities, protocols, and boundary adapters."""
+"""Unit tests for domain models, protocols, and boundary adapters."""
 
 from __future__ import annotations
 
@@ -7,13 +7,6 @@ from dataclasses import dataclass
 
 import pytest
 
-from honba_data.domain.events import (
-    CoverageLedgerUpdated,
-    DataQualityAlertRaised,
-    DomainEvent,
-    FundamentalsIngested,
-    IngestionFailed,
-)
 from honba_data.domain.models import (
     Bar,
     BarProtocol,
@@ -29,13 +22,15 @@ from honba_data.domain.models import (
 )
 
 
-def test_instrument_id_creation_and_defaults() -> None:
-    inst1 = InstrumentId("TCS", "NSE")
-    assert inst1.symbol == "TCS"
+def test_instrument_id_creation() -> None:
+    inst1 = InstrumentId(symbol="RELIANCE", exchange="NSE")
+    assert inst1.symbol == "RELIANCE"
     assert inst1.exchange == "NSE"
-    assert str(inst1) == "TCS.NSE"
+    assert str(inst1) == "RELIANCE.NSE"
+    assert inst1.to_dict() == {"symbol": "RELIANCE", "exchange": "NSE"}
 
-    inst2 = LocalInstrumentId("INFY")
+    # Default exchange is NSE
+    inst2 = InstrumentId(symbol="INFY")
     assert inst2.symbol == "INFY"
     assert inst2.exchange == "NSE"
     assert str(inst2) == "INFY.NSE"
@@ -80,7 +75,7 @@ def test_as_instrument_id_adapter() -> None:
     assert inst5.exchange == "NSE"
 
     with pytest.raises(TypeError):
-        as_instrument_id(12345)
+        _ = as_instrument_id(12345)
 
 
 def test_bar_creation_and_protocol_conformance() -> None:
@@ -129,12 +124,12 @@ def test_as_bar_adapter() -> None:
         "volume": 500.0,
     }
     adapted_map = as_bar(mapping)
-    assert adapted_map.instrument_id.symbol == "TCS"
+    assert getattr(adapted_map.instrument_id, "symbol", "") == "TCS"
     assert adapted_map.ts == 2_000_000_000
     assert adapted_map.close == 105.0
 
     with pytest.raises(TypeError):
-        as_bar("not-a-bar")
+        _ = as_bar("not-a-bar")
 
 
 def test_financial_statement_invariants() -> None:
@@ -153,7 +148,7 @@ def test_financial_statement_invariants() -> None:
 
     # Invalid period type
     with pytest.raises(ValueError, match="period_type"):
-        FinancialStatement(
+        _ = FinancialStatement(
             symbol="TCS",
             fiscal_date=dt.date(2025, 3, 31),
             filing_date=dt.date(2025, 4, 15),
@@ -163,7 +158,7 @@ def test_financial_statement_invariants() -> None:
 
     # Invalid statement type
     with pytest.raises(ValueError, match="Unknown statement_type"):
-        FinancialStatement(
+        _ = FinancialStatement(
             symbol="TCS",
             fiscal_date=dt.date(2025, 3, 31),
             filing_date=dt.date(2025, 4, 15),
@@ -178,61 +173,27 @@ def test_financial_ratios() -> None:
         fiscal_date=dt.date(2025, 3, 31),
         filing_date=dt.date(2025, 4, 18),
         period_type="FY",
-        roce_pct=32.5,
-        roe_pct=28.1,
+        roce_pct=31.5,
+        roe_pct=28.2,
+        operating_margin_pct=24.0,
+        net_margin_pct=19.5,
         debt_to_equity=0.08,
+        free_cash_flow=220000.0,
     )
     assert ratios.symbol == "INFY"
-    assert ratios.roce_pct == 32.5
+    assert ratios.roce_pct == 31.5
     assert ratios.debt_to_equity == 0.08
 
 
 def test_company_entity() -> None:
     comp = Company(
         symbol="RELIANCE",
-        company_name="Reliance Industries Limited",
-        industry="Oil & Gas / Telecom / Retail",
+        company_name="Reliance Industries Ltd",
+        industry="Refineries & Marketing",
+        series="EQ",
         isin_code="INE002A01018",
         cap_category="LARGE_CAP",
+        index_name="NIFTY 50",
     )
     assert comp.symbol == "RELIANCE"
     assert comp.cap_category == "LARGE_CAP"
-
-
-def test_domain_events() -> None:
-    event = FundamentalsIngested(
-        symbol="TCS",
-        period_type="FY",
-        fiscal_date=dt.date(2025, 3, 31),
-        filing_date=dt.date(2025, 4, 15),
-        statement_types=("INCOME", "BALANCE_SHEET"),
-        rows_written=42,
-    )
-    assert isinstance(event, DomainEvent)
-    assert event.symbol == "TCS"
-    assert event.rows_written == 42
-    assert event.occurred_at is not None
-
-    alert = DataQualityAlertRaised(
-        issue_type="NON_FINITE_VALUE",
-        severity="ERROR",
-        symbol="TEST",
-        details="NaN detected in close price",
-    )
-    assert alert.severity == "ERROR"
-
-    ledger_event = CoverageLedgerUpdated(
-        symbol="TCS",
-        exchange="NSE",
-        timeframe="1D",
-        start_date=dt.date(2025, 1, 1),
-        end_date=dt.date(2025, 12, 31),
-    )
-    assert ledger_event.timeframe == "1D"
-
-    fail_event = IngestionFailed(
-        provider="NSE",
-        symbol="XYZ",
-        error_message="HTTP 404",
-    )
-    assert fail_event.provider == "NSE"

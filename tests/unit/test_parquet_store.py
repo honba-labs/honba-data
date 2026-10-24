@@ -31,7 +31,7 @@ def test_validate_bar_invariants() -> None:
 
     # High < Low
     with pytest.raises(ValueError, match="high must be >= low"):
-        validate_bar(
+        _ = validate_bar(
             Bar(
                 instrument_id=inst,
                 ts=100,
@@ -45,7 +45,7 @@ def test_validate_bar_invariants() -> None:
 
     # Open > High
     with pytest.raises(ValueError, match="open must be between"):
-        validate_bar(
+        _ = validate_bar(
             Bar(
                 instrument_id=inst,
                 ts=100,
@@ -59,7 +59,7 @@ def test_validate_bar_invariants() -> None:
 
     # Close < Low
     with pytest.raises(ValueError, match="close must be between"):
-        validate_bar(
+        _ = validate_bar(
             Bar(
                 instrument_id=inst,
                 ts=100,
@@ -73,7 +73,7 @@ def test_validate_bar_invariants() -> None:
 
     # Negative volume
     with pytest.raises(ValueError, match="volume must be >= 0"):
-        validate_bar(
+        _ = validate_bar(
             Bar(
                 instrument_id=inst,
                 ts=100,
@@ -87,7 +87,7 @@ def test_validate_bar_invariants() -> None:
 
     # Non-finite price
     with pytest.raises(ValueError, match="must be finite"):
-        validate_bar(
+        _ = validate_bar(
             Bar(
                 instrument_id=inst,
                 ts=100,

@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+from honba_data.domain.coverage import (
+    CoverageRecord,
+    CoverageStatus,
+    DateInterval,
+    QualityIssue,
+    merge_close_intervals,
+    merge_intervals,
+    plan_gaps,
+    subtract_intervals,
+)
 from honba_data.domain.events import (
     CoverageLedgerUpdated,
     DataQualityAlertRaised,
@@ -28,7 +38,10 @@ __all__ = [
     "BarProtocol",
     "Company",
     "CoverageLedgerUpdated",
+    "CoverageRecord",
+    "CoverageStatus",
     "DataQualityAlertRaised",
+    "DateInterval",
     "DomainEvent",
     "FinancialRatios",
     "FinancialStatement",
@@ -38,6 +51,11 @@ __all__ = [
     "InstrumentIdProtocol",
     "LocalBar",
     "LocalInstrumentId",
+    "QualityIssue",
     "as_bar",
     "as_instrument_id",
+    "merge_close_intervals",
+    "merge_intervals",
+    "plan_gaps",
+    "subtract_intervals",
 ]
