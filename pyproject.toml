@@ -23,8 +23,15 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio",
+    "hypothesis>=6.90.0",
     "ruff>=0.4.0",
     "pyright>=1.1.350",
+]
+experimental = [
+    "yfinance>=0.2.30",
+]
+arrow-flight = [
+    "pyarrow>=14.0.0",
 ]
 
 [project.scripts]

@@ -18,6 +18,17 @@ from honba_data.coverage.data_quality import (
     QualityIssueType,
     QualitySeverity,
 )
+from honba_data.domain.models import (
+    Bar,
+    BarProtocol,
+    Company,
+    FinancialRatios,
+    FinancialStatement,
+    InstrumentId,
+    InstrumentIdProtocol,
+    as_bar,
+    as_instrument_id,
+)
 from honba_data.providers.fundamentals import (
     CompanyMetadata,
     download_fundamentals_to_duckdb,
@@ -34,11 +45,15 @@ from honba_data.store.mutual_funds import (
     FundStat,
     SchemeMetadata,
 )
+from honba_data.store.parquet import ParquetBarStore
 from honba_data.store.sebi_audit import DuckDbAuditLedger
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "Bar",
+    "BarProtocol",
+    "Company",
     "CompanyMetadata",
     "CorporateAction",
     "DataQualityChecker",
@@ -47,12 +62,19 @@ __all__ = [
     "DuckDbCorporateActionsStore",
     "DuckDbFundamentalsStore",
     "DuckDbMutualFundsStore",
+    "FinancialRatios",
+    "FinancialStatement",
     "FundHolding",
     "FundStat",
+    "InstrumentId",
+    "InstrumentIdProtocol",
+    "ParquetBarStore",
     "QualityIssue",
     "QualityIssueType",
     "QualitySeverity",
     "SchemeMetadata",
+    "as_bar",
+    "as_instrument_id",
     "download_fundamentals_to_duckdb",
     "fetch_large_midcap_universe",
     "find_data_root",
