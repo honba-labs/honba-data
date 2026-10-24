@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import pytest
 
@@ -184,7 +185,7 @@ def test_data_service_bars_not_implemented_when_delegate_missing() -> None:
     interval = DateInterval(dt.date(2025, 1, 1), dt.date(2025, 1, 10))
 
     with pytest.raises(NotImplementedError, match="Market data delegate"):
-        service.get_bars(inst, "1D", interval)
+        _ = service.get_bars(inst, "1D", interval)
 
 
 def test_data_service_bars_with_parquet_store_delegate(tmp_path: Path) -> None:

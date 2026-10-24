@@ -79,8 +79,8 @@ class JsonCoverageRepository(CoverageRepository):
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_file = self.ledger_path.with_suffix(f".tmp.{os.getpid()}")
         payload = json.dumps(data, indent=2, sort_keys=True)
-        tmp_file.write_text(payload, encoding="utf-8")
-        tmp_file.replace(self.ledger_path)
+        _ = tmp_file.write_text(payload, encoding="utf-8")
+        _ = tmp_file.replace(self.ledger_path)
 
     @staticmethod
     def _make_key(exchange: str, symbol: str, timeframe: str) -> str:
@@ -114,7 +114,7 @@ class JsonCoverageRepository(CoverageRepository):
 
     def append_record(self, record: CoverageRecord) -> None:
         """Append a record without immediately returning merged records."""
-        self.update_interval(record)
+        _ = self.update_interval(record)
 
     def update_interval(self, record: CoverageRecord) -> Sequence[CoverageRecord]:
         """Atomically record, merge contiguous/overlapping intervals, and emit event."""

@@ -283,4 +283,4 @@ class ParquetBarStore:
             _ = tmp_path.replace(fpath)
 
         # Update ledger atomically through JsonCoverageRepository
-        self._coverage_repo.update_interval(record)
+        _ = self._coverage_repo.update_interval(record)

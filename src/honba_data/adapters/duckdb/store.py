@@ -646,7 +646,7 @@ class DuckDbFundamentalsStore(FundamentalsRepository):
     ) -> pd.DataFrame:
         """Perform a point-in-time ASOF JOIN between price bars and financial ratios."""
         with self._get_connection() as con:
-            con.register("prices_input", prices_df)
+            _ = con.register("prices_input", prices_df)
             query = """
                 SELECT
                     p.*,

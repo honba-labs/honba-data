@@ -33,7 +33,7 @@ def test_json_ledger_atomic_append_and_merge(tmp_path: Path) -> None:
         source="nse_bhavcopy",
         row_count=9,
     )
-    repo.update_interval(rec1)
+    _ = repo.update_interval(rec1)
 
     assert len(events) == 1
     assert isinstance(events[0], CoverageLedgerUpdated)
@@ -81,7 +81,7 @@ def test_json_ledger_detect_gaps(tmp_path: Path) -> None:
         source="test",
         row_count=10,
     )
-    repo.update_interval(rec)
+    _ = repo.update_interval(rec)
 
     # Query required [2025-01-01, 2025-01-20)
     required = DateInterval(dt.date(2025, 1, 1), dt.date(2025, 1, 20))

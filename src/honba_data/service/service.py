@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 class DataServiceImpl(DataService):
     """Canonical implementation of the DataService hexagonal inbound port."""
 
+    _fundamentals_repo: FundamentalsRepository
+    _coverage_repo: CoverageRepository | None
+    _market_data_store: Any
+
     def __init__(
         self,
         fundamentals_repo: FundamentalsRepository,

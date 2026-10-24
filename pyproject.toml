@@ -55,6 +55,7 @@ ignore = ["E501"]
 [tool.pyright]
 include = ["src", "scripts", "tests"]
 extraPaths = ["src"]
+typeCheckingMode = "standard"
 executionEnvironments = [
   { root = ".", extraPaths = ["src"] }
 ]

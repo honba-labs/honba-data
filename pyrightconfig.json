@@ -1,6 +1,13 @@
 {
-  "include": ["src", "scripts", "tests"],
-  "extraPaths": ["src"],
+  "include": [
+    "src",
+    "scripts",
+    "tests"
+  ],
+  "extraPaths": [
+    "src"
+  ],
   "venvPath": ".",
-  "venv": ".venv"
+  "venv": ".venv",
+  "typeCheckingMode": "standard"
 }
