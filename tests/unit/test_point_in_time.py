@@ -8,6 +8,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from honba_data.domain.models import FinancialRatios, FinancialStatement
+from honba_data.service.service import DataServiceImpl
 from honba_data.store.fundamentals import DuckDbFundamentalsStore
 
 
@@ -108,6 +110,133 @@ def test_point_in_time_look_ahead_bias_elimination(store: DuckDbFundamentalsStor
     assert pit_nov[0]["period_end_date"] == dt.date(2025, 9, 30)
     assert pit_nov[0]["filing_date"] == dt.date(2025, 11, 12)
     assert pit_nov[0]["roce_pct"] == 15.8
+
+
+def test_statements_point_in_time_visibility_invariant(store: DuckDbFundamentalsStore) -> None:
+    """Invariant: Given a query as_of = '2024-05-01', statements filed on '2024-05-15'
+
+    (even for Q4 2023 / period ended 2024-03-31) MUST NOT be visible.
+    """
+    stmt_fy23 = FinancialStatement(
+        symbol="INFY",
+        period_type="FQ",
+        statement_type="INCOME",
+        fiscal_date=dt.date(2024, 3, 31),
+        filing_date=dt.date(2024, 5, 15),  # Filed after 2024-05-01
+        line_items={"Total Revenue": 379230000000.0, "Net Income": 79690000000.0},
+    )
+    store.save_statements([stmt_fy23])
+
+    # 1. Query strictly on or before 2024-05-01 -> MUST be completely invisible
+    res_before = store.query_point_in_time_statements(
+        as_of_date=dt.date(2024, 5, 1),
+        symbols=["INFY"],
+        period_type="FQ",
+    )
+    assert len(res_before) == 0, (
+        f"Statement filed on 2024-05-15 must not be visible on 2024-05-01, got: {res_before}"
+    )
+
+    raw_before = store.query_point_in_time_statements_raw(
+        as_of_date="2024-05-01",
+        symbols=["INFY"],
+        period_type="FQ",
+    )
+    assert len(raw_before) == 0
+
+    # 2. Query on or after filing date 2024-05-15 -> MUST be visible
+    res_after = store.query_point_in_time_statements(
+        as_of_date=dt.date(2024, 5, 15),
+        symbols=["INFY"],
+        period_type="FQ",
+    )
+    assert len(res_after) == 1
+    assert res_after[0].symbol == "INFY"
+    assert res_after[0].fiscal_date == dt.date(2024, 3, 31)
+    assert res_after[0].filing_date == dt.date(2024, 5, 15)
+    assert res_after[0].line_items["Net Income"] == 79690000000.0
+
+
+def test_fundamental_screener_zero_look_ahead_bias(store: DuckDbFundamentalsStore) -> None:
+    """Verify zero look-ahead bias across fundamental screener queries with staggered filing dates."""
+    # Three companies with staggered Q4 earnings release dates:
+    # 1. TCS: FY ends 2024-03-31, filed 2024-04-12, ROCE 55.0%
+    # 2. INFY: FY ends 2024-03-31, filed 2024-04-25, ROCE 32.0%
+    # 3. WIPRO: FY ends 2024-03-31, filed 2024-05-10, ROCE 18.0%
+    ratios = [
+        FinancialRatios(
+            symbol="TCS",
+            fiscal_date=dt.date(2024, 3, 31),
+            filing_date=dt.date(2024, 4, 12),
+            period_type="FY",
+            roce_pct=55.0,
+            roe_pct=50.0,
+            operating_margin_pct=25.0,
+            net_margin_pct=20.0,
+        ),
+        FinancialRatios(
+            symbol="INFY",
+            fiscal_date=dt.date(2024, 3, 31),
+            filing_date=dt.date(2024, 4, 25),
+            period_type="FY",
+            roce_pct=32.0,
+            roe_pct=29.0,
+            operating_margin_pct=21.0,
+            net_margin_pct=17.0,
+        ),
+        FinancialRatios(
+            symbol="WIPRO",
+            fiscal_date=dt.date(2024, 3, 31),
+            filing_date=dt.date(2024, 5, 10),
+            period_type="FY",
+            roce_pct=18.0,
+            roe_pct=15.0,
+            operating_margin_pct=15.0,
+            net_margin_pct=12.0,
+        ),
+    ]
+    store.save_ratios(ratios)
+
+    # Screener objective: Find all IT companies with ROCE > 20%
+    def run_screener(as_of: dt.date) -> list[str]:
+        results = store.query_point_in_time(as_of_date=as_of, period_type="FY")
+        return [r.symbol for r in results if r.roce_pct is not None and r.roce_pct > 20.0]
+
+    # As-of April 10, 2024: Neither has filed -> 0 companies pass screener
+    assert run_screener(dt.date(2024, 4, 10)) == []
+
+    # As-of April 15, 2024: Only TCS has filed -> only TCS passes screener
+    assert run_screener(dt.date(2024, 4, 15)) == ["TCS"]
+
+    # As-of May 1, 2024: TCS and INFY have filed -> TCS and INFY pass screener, WIPRO still not filed
+    assert sorted(run_screener(dt.date(2024, 5, 1))) == ["INFY", "TCS"]
+
+    # As-of May 15, 2024: All 3 have filed -> TCS and INFY pass (WIPRO has ROCE 18% <= 20%)
+    assert sorted(run_screener(dt.date(2024, 5, 15))) == ["INFY", "TCS"]
+
+
+def test_data_service_point_in_time_ratios_integration(store: DuckDbFundamentalsStore) -> None:
+    """Verify DataService facade strictly enforces point-in-time invariant via get_ratios(as_of=...)."""
+    service = DataServiceImpl(fundamentals_repo=store)
+
+    ratio = FinancialRatios(
+        symbol="HDFCBANK",
+        fiscal_date=dt.date(2024, 3, 31),
+        filing_date=dt.date(2024, 4, 20),
+        period_type="FY",
+        roce_pct=16.8,
+        roe_pct=17.5,
+    )
+    store.save_ratios([ratio])
+
+    # 1. as_of before filing date -> empty
+    before = service.get_ratios("HDFCBANK", as_of=dt.date(2024, 4, 15))
+    assert len(before) == 0
+
+    # 2. as_of on or after filing date -> returns statement
+    after = service.get_ratios("HDFCBANK", as_of=dt.date(2024, 4, 20))
+    assert len(after) == 1
+    assert after[0].roce_pct == 16.8
 
 
 def test_as_of_join_prices_and_fundamentals(store: DuckDbFundamentalsStore) -> None:

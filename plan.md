@@ -185,21 +185,25 @@ Downstream consumers (such as the strategy screener or signal engine) subscribe 
   - Integrated domain event publication (`CoverageLedgerUpdated`).
   - Added unit test suite in `tests/unit/test_json_ledger.py`.
 
-### Phase 4: TDD Rigor, Invariant Enforcement & Property-Based Testing (P1)
-- [ ] **4.1 Property-Based Interval Algebra Tests (`Hypothesis`)**
-  - Add property-based tests in `tests/unit/test_coverage_algebra.py`:
+### Phase 4: TDD Rigor, Invariant Enforcement & Property-Based Testing (P1) — COMPLETED
+- [x] **4.1 Property-Based Interval Algebra Tests (`Hypothesis`)**
+  - Added property-based tests in `tests/unit/test_coverage_algebra.py`:
     - Invariant 1: Appending a continuous sequence of bars never creates a coverage gap.
     - Invariant 2: The union of contiguous coverage intervals is monotonic and non-overlapping.
     - Invariant 3: Querying a covered interval returns the exact bars appended, with zero duplication.
-- [ ] **4.2 Point-in-Time (PIT) Invariant Verification**
-  - Implement rigorous test suite verifying point-in-time consistency:
+    - Verified pure interval algebra invariants (`merge_intervals`, `subtract_intervals`, `merge_close_intervals`) across arbitrary date ranges.
+- [x] **4.2 Point-in-Time (PIT) Invariant Verification**
+  - Expanded test suite in `tests/unit/test_point_in_time.py`:
     - Given a query `as_of = '2024-05-01'`, statements filed on `'2024-05-15'` (even for Q4 2023) MUST NOT be visible.
-    - Assert zero look-ahead bias across all fundamental screener queries.
-- [ ] **4.3 DataService Contract Verification Suite**
-  - Implement reusable contract test suite `tests/contract/test_data_service.py` that can be run against any repository/service implementation.
-- [ ] **4.4 Quarantine Experimental Drivers**
-  - Mark `test_yfinance_driver.py` with `@pytest.mark.experimental` and `@pytest.mark.integration`.
-  - Isolate external network calls behind mock HTTP adapters for deterministic unit test execution.
+    - Verified zero look-ahead bias across all fundamental screener queries with staggered corporate filings.
+    - Verified point-in-time enforcement through `DataService.get_ratios(symbol, as_of=...)`.
+- [x] **4.3 DataService Contract Verification Suite**
+  - Implemented reusable contract test suite `tests/contract/test_data_service.py` (`BaseDataServiceContractTests`).
+  - Tested protocol conformance, statement querying, PIT ratio queries, bar interval slicing, and coverage ledger integration across both `InMemoryDataService` and `DuckDbLakehouseDataService`.
+- [x] **4.4 Quarantine Experimental Drivers**
+  - Marked `test_yfinance_driver.py` with `@pytest.mark.experimental` and `@pytest.mark.integration`.
+  - Configured custom markers in `pytest.ini` and `pyproject.toml`.
+  - Isolated external network calls behind mock HTTP adapters for 100% deterministic unit test execution.
 
 ### Phase 5: Concurrency Isolation & Lakehouse Observability (P2)
 - [ ] **5.1 Documented Concurrency Model & Runtime Isolation**
@@ -238,7 +242,7 @@ Downstream consumers (such as the strategy screener or signal engine) subscribe 
 | **Tactical DDD** | Concrete DuckDB SQL script directly in store | `FundamentalsRepository` & `CoverageRepository` protocols; move SQL to `adapters/` | **Phase 2 (Done)** |
 | **Domain Events** | No events; polling required | Introduce `FundamentalsIngested`, `CoverageLedgerUpdated`, `DataQualityAlertRaised` | **Phase 1 (Done)** |
 | **Parquet Lakehouse** | Incomplete stub with `f64` bars & JSON ledger | Delegate market data to `honba-me` or align schema with Hive `Decimal128` | **Phase 3 (Done)** |
-| **TDD & Invariants** | Basic DuckDB schema tests; ad-hoc yfinance test | Property-based tests (`Hypothesis`) for coverage algebra & strict point-in-time queries | **Phase 4** |
+| **TDD & Invariants** | Basic DuckDB schema tests; ad-hoc yfinance test | Property-based tests (`Hypothesis`) for coverage algebra & strict point-in-time queries | **Phase 4 (Done)** |
 | **Concurrency Model** | Ad-hoc `ThreadPoolExecutor` & polling thread | Isolate as batch/offline lakehouse; bounded backpressure; zero live actor stalling | **Phase 5** |
 | **Observability** | Only basic `logging.getLogger` | Structured JSON ingestion telemetry + `honba-data status` CLI command | **Phase 5** |
 | **Provider Maturity** | `yfinance` mixed in as if production ready | Label `yfinance` as experimental; prioritize official NSE filings & bhavcopy | **Phase 5** |

@@ -6,15 +6,29 @@ import datetime as dt
 import logging
 from collections.abc import Sequence
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from typer.testing import CliRunner
 
 from honba_data.live import yfinance_driver as yd
 
+pytestmark = [pytest.mark.experimental, pytest.mark.integration]
+
 UTC = dt.timezone.utc
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 T0 = dt.datetime(2026, 1, 5, 4, 0, tzinfo=UTC)  # 09:30 IST
+
+
+@pytest.fixture(autouse=True)
+def isolate_external_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure no unmocked external network sockets can be opened during test execution."""
+    import socket
+
+    def guarded_connect(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("External network connection prohibited in unit tests")
+
+    monkeypatch.setattr(socket, "create_connection", guarded_connect)
 
 
 def row(minute: int, px: float = 100.0) -> yd.Row:
@@ -45,7 +59,9 @@ class FakeHttp:
         return 200, {"data": {"accepted": len(payload["bars"])}}
 
 
-def make(rows_by_symbol, http, clock, **kw):
+def make(
+    rows_by_symbol: dict[str, list[yd.Row]], http: FakeHttp, clock: Clock, **kw: Any
+) -> yd.YFinanceBarDriver:
     kw.setdefault("backfill", True)
     return yd.YFinanceBarDriver(
         symbols=list(rows_by_symbol),
@@ -209,7 +225,7 @@ def test_503_is_fatal_with_clear_message():
 
 
 @pytest.mark.parametrize("status", [401, 403, 422])
-def test_other_rejections_are_fatal(status):
+def test_other_rejections_are_fatal(status: int):
     clock = Clock(T0 + dt.timedelta(minutes=10))
     d = make({"A": [row(0)]}, FakeHttp([(status, {"error": {"code": "x"}})]), clock)
     with pytest.raises(yd.IngestFatalError, match=str(status)):
@@ -220,7 +236,7 @@ def test_fetch_error_does_not_kill_driver():
     clock = Clock(T0 + dt.timedelta(minutes=10))
     calls = {"n": 0}
 
-    def fetch(sym, interval):
+    def fetch(sym: str, interval: str) -> list[yd.Row]:
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("yahoo down")
@@ -259,7 +275,7 @@ def test_run_stops_gracefully_and_sleeps_poll_interval():
     assert clock.sleeps[:2] == [30, 30]
 
 
-def test_token_never_logged(caplog):
+def test_token_never_logged(caplog: pytest.LogCaptureFixture):
     clock = Clock(T0 + dt.timedelta(minutes=10))
     http = FakeHttp([(429, {"error": {}}), (200, {"data": {"accepted": 1}})])
     with caplog.at_level(logging.DEBUG):
@@ -269,7 +285,7 @@ def test_token_never_logged(caplog):
     assert "SECRET-TOKEN" not in repr(d)
 
 
-def test_default_http_post_sends_bearer(monkeypatch):
+def test_default_http_post_sends_bearer(monkeypatch: pytest.MonkeyPatch):
     seen = {}
 
     class Resp:
@@ -281,10 +297,10 @@ def test_default_http_post_sends_bearer(monkeypatch):
         def __enter__(self):
             return self
 
-        def __exit__(self, *a):
+        def __exit__(self, *a: Any):
             return False
 
-    def fake_urlopen(req, timeout=None):
+    def fake_urlopen(req: Any, timeout: Any = None):
         seen["auth"] = req.get_header("Authorization")
         seen["url"] = req.full_url
         return Resp()
@@ -295,13 +311,13 @@ def test_default_http_post_sends_bearer(monkeypatch):
     assert seen == {"auth": "Bearer tok", "url": "http://h/bars"}
 
 
-def test_cli_wiring(monkeypatch):
+def test_cli_wiring(monkeypatch: pytest.MonkeyPatch):
     from honba_data.cli.main import app
 
-    captured = {}
+    captured: dict[str, Any] = {}
 
     class FakeDriver:
-        def __init__(self, **kw):
+        def __init__(self, **kw: Any):
             captured.update(kw)
 
         def run(self):
@@ -332,9 +348,46 @@ def test_cli_wiring(monkeypatch):
     assert "delayed" in CliRunner().invoke(app, ["live", "yfinance", "--help"]).output.lower()
 
 
-def test_cli_missing_token_env_fails(monkeypatch):
+def test_cli_missing_token_env_fails(monkeypatch: pytest.MonkeyPatch):
     from honba_data.cli.main import app
 
     monkeypatch.delenv("HONBA_TOKEN", raising=False)
     res = CliRunner().invoke(app, ["live", "yfinance", "--symbols", "A", "--server", "http://x"])
     assert res.exit_code != 0
+
+
+def test_default_fetch_with_mocked_yfinance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify that default_fetch parses yfinance historical data without network calls."""
+    import sys
+
+    import pandas as pd
+
+    fake_df = pd.DataFrame(
+        {
+            "Open": [100.0],
+            "High": [105.0],
+            "Low": [99.0],
+            "Close": [104.0],
+            "Volume": [1000.0],
+        },
+        index=pd.to_datetime(["2026-01-05 09:30:00"]),
+    )
+
+    class FakeTicker:
+        def __init__(self, ticker: str) -> None:
+            self.ticker = ticker
+
+        def history(self, period: str, interval: str) -> pd.DataFrame:
+            return fake_df
+
+    mock_yf = MagicMock()
+    mock_yf.Ticker = FakeTicker
+    monkeypatch.setitem(sys.modules, "yfinance", mock_yf)
+
+    rows = yd.default_fetch("RELIANCE.NSE", "1m")
+    assert len(rows) == 1
+    assert rows[0].open == 100.0
+    assert rows[0].high == 105.0
+    assert rows[0].low == 99.0
+    assert rows[0].close == 104.0
+    assert rows[0].volume == 1000.0
