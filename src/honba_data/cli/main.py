@@ -10,6 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from honba_data.cli.status import status_cmd
 from honba_data.coverage.data_quality import DataQualityChecker
 from honba_data.live.cli import live_app
 from honba_data.providers.fundamentals import download_fundamentals_to_duckdb
@@ -20,6 +21,7 @@ app = typer.Typer(
     help="honba-data CLI: manage market data, fundamentals, and DuckDB store", no_args_is_help=True
 )
 app.add_typer(live_app, name="live")
+app.command("status")(status_cmd)
 console = Console()
 err_console = Console(stderr=True)
 

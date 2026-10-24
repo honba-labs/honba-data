@@ -678,7 +678,7 @@ class DuckDbFundamentalsStore(FundamentalsRepository):
                     )
             return res
 
-    def get_summary(self) -> dict[str, str | int | None]:
+    def get_summary(self) -> dict[str, Any]:
         """Return dataset counts and inventory statistics."""
         with self._get_connection() as con:
 

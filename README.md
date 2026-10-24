@@ -20,6 +20,24 @@ Financial Data Lakehouse, DuckDB Fundamentals Store, Market Data Providers, and 
 3. **Automated Cross-Verification**:
    - Automated reconciliation test suite validating downloaded fundamentals against official BSE/NSE audited annual reports with **0.00% discrepancy**.
    - IndAS/GAAP accounting invariant audits ensuring mathematical identity consistency.
+4. **Lakehouse Observability & Structured Ingestion Telemetry**:
+   - Real-time `honba-data status` CLI inspection command.
+   - Emits structured JSON telemetry payloads (`ingestion_completed`) tracking symbol attempted/succeeded/failed, rows written, delta days, and elapsed execution time.
+
+---
+
+## Concurrency Model & Runtime Isolation
+
+`honba-data` is architected with strict concurrency and runtime boundaries:
+
+1. **Batch/Offline Lakehouse Runtime**:
+   `honba-data` operates as an offline, analytical lakehouse system. It is strictly decoupled from `honba-ya`'s low-latency pinned-thread actor runtime.
+2. **Bounded Concurrency with Backpressure**:
+   All data ingestion pipelines enforce bounded concurrency using `BoundedExecutor` or `asyncio.Semaphore`. Workloads are throttled with backpressure at submission time to avoid memory bloat and unbounded task queue accumulation.
+3. **Prohibition of Uncoordinated ThreadPools in Live Paths**:
+   Live actor threads (e.g. `honba-ya` trading actors) are isolated from lakehouse thread pool execution. Uncoordinated `ThreadPoolExecutor` creation within live trading paths is prohibited (`LiveActorConcurrencyViolation` guard) to prevent core thrashing, thread contention, and event-loop stalling.
+4. **Provider Maturity Quarantining**:
+   Official NSE/BSE corporate filings and official bhavcopy feeds are designated for production. Scraping drivers like `yfinance` are quarantined behind secondary adapter ports and marked `@pytest.mark.experimental` for dev/paper use only.
 
 ---
 
@@ -30,14 +48,21 @@ honba-data/
 ├── pyproject.toml              # Package definition & CLI entrypoint
 ├── src/
 │   └── honba_data/
-│       ├── store/              # DuckDbFundamentalsStore & ParquetBarStore
-│       ├── providers/          # fundamentals downloader, NSE Bhavcopy, yfinance
+│       ├── adapters/           # DuckDB & JSON ledger secondary adapters
+│       ├── cli/                # honba-data Typer CLI (status, fundamentals, summary)
+│       ├── concurrency.py      # Bounded concurrency & runtime isolation guards
 │       ├── coverage/           # Coverage ledger & interval algebra
-│       ├── service/            # DataService port & contract
-│       └── cli/                # honba-data Typer CLI
+│       ├── domain/             # Entities, Value Objects, Domain Events
+│       ├── live/               # Live drivers & quarantined pollers
+│       ├── ports/              # Hexagonal interface contracts (DataService, Repos)
+│       ├── providers/          # Fundamentals downloaders & parsers
+│       ├── service/            # DataService implementation coordinating repos
+│       ├── store/              # Storage facades (DuckDbFundamentalsStore, etc.)
+│       └── telemetry.py        # Structured JSON ingestion telemetry schema & sink
 ├── tests/
-│   ├── unit/                   # Fast deterministic schema & store tests
-│   └── integration/            # BSE/NSE ground truth cross-verification tests
+│   ├── contract/               # Hexagonal DataService contract test suite
+│   ├── integration/            # BSE/NSE ground truth cross-verification tests
+│   └── unit/                   # Fast deterministic schema, algebra, & concurrency tests
 ├── scripts/
 │   ├── download_fundamentals.py # Parallel downloader with terminal progress bar
 │   └── verify_fundamentals.py   # Visual audited reconciliation scorecard
@@ -48,26 +73,35 @@ honba-data/
 
 ## Quickstart
 
-### 1. Download Large-Cap and Mid-Cap Fundamentals into DuckDB
+### 1. Inspect Lakehouse Health & Regulatory Compliance (`honba-data status`)
 ```bash
-# Using the CLI
+# Render terminal tables: health, filing timeliness, provider error rates, and 0.00% discrepancy reconciliation
+honba-data status
+
+# Export structured health JSON for CI/monitoring
+honba-data status --json
+```
+
+### 2. Download Large-Cap and Mid-Cap Fundamentals into DuckDB
+```bash
+# Using the CLI (bounded workers with backpressure)
 honba-data fundamentals --universe all --workers 8
 
 # Or using the downloader script
 python scripts/download_fundamentals.py --universe all
 ```
 
-### 2. Inspect Dataset Statistics
+### 3. Inspect Dataset Statistics
 ```bash
 honba-data summary
 ```
 
-### 3. Verify Against Audited Reports
+### 4. Verify Against Audited Reports
 ```bash
 python scripts/verify_fundamentals.py
 ```
 
-### 4. Query via Python & DuckDB
+### 5. Query via Python & DuckDB
 ```python
 import duckdb
 
@@ -97,8 +131,11 @@ print(df)
 ## Testing & Quality Assurance
 
 ```bash
-# Unit tests
+# Unit tests (including concurrency, telemetry, and CLI)
 pytest tests/unit -v
+
+# Hexagonal DataService Contract Tests
+pytest tests/contract -v
 
 # Audited Ground Truth Integration Tests
 pytest tests/integration -v
@@ -106,4 +143,7 @@ pytest tests/integration -v
 # Lint & Format
 ruff check .
 ruff format --check .
+
+# Static Type Checking
+pyright
 ```

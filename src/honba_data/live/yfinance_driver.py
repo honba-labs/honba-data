@@ -4,6 +4,10 @@ WARNING: yfinance is an UNOFFICIAL, DELAYED data source (scraped from Yahoo, typ
 15+ minutes behind for Indian exchanges, rate limited, no SLA). Use this driver for
 development and paper trading only, never for live capital.
 
+RUNTIME & CONCURRENCY ISOLATION:
+`honba-data` is an offline lakehouse system decoupled from `honba-ya`'s pinned-thread actor
+runtime. Uncoordinated `ThreadPoolExecutor` execution in live trading paths is prohibited.
+
 Behaviour:
 
 * Only CLOSED bars are posted (``bar_start + interval <= now``); the forming bar is never sent.
@@ -31,6 +35,8 @@ import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
+
+from honba_data.concurrency import verify_lakehouse_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +233,7 @@ class YFinanceBarDriver:
         max_retries: int = 5,
         backfill: bool = False,
     ) -> None:
+        verify_lakehouse_runtime()
         interval_to_spec(interval)
         self.symbols = list(symbols)
         self.interval = interval
@@ -306,6 +313,7 @@ class YFinanceBarDriver:
         return accepted
 
     def run(self) -> None:
+        verify_lakehouse_runtime()
         while not self._stop.is_set():
             self.poll_once()
             if self._stop.is_set():

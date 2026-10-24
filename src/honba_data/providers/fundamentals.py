@@ -8,28 +8,42 @@ and computed fundamental ratios (P/E, ROCE, ROE, margins, debt/equity) for India
 STRICT INVARIANT:
 Does NOT store daily or intraday stock/equity price bars. Only financial statements,
 quarterly filings, balance sheets, and fundamental ratios are persisted in DuckDB.
+
+RUNTIME & CONCURRENCY ISOLATION:
+Operates exclusively as an offline batch lakehouse pipeline using bounded worker pools
+with backpressure (`BoundedExecutor` and `asyncio.Semaphore`). Never spawns uncoordinated
+thread pools in live trading paths.
+
+PROVIDER MATURITY NOTE:
+Official NSE/BSE corporate filings and audited annual reports are the primary canonical
+source for production compliance. yfinance is an experimental/unofficial driver suitable
+for development, historical estimation, and paper-trading pipelines only.
 """
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import dataclasses
 import datetime as dt
 import io
 import logging
 import math
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import duckdb
 import pandas as pd
 import yfinance as yf
 
+from honba_data.concurrency import BoundedExecutor, verify_lakehouse_runtime
 from honba_data.store.fundamentals import DuckDbFundamentalsStore
+from honba_data.telemetry import emit_ingestion_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -453,8 +467,13 @@ def download_fundamentals_to_duckdb(
     limit: int | None = None,
     skip_existing: bool = True,
     progress_callback: object | None = None,
-) -> dict[str, str | int | None]:
-    """Download yearly and quarterly financials for large and mid cap companies and store in DuckDB."""
+) -> dict[str, Any]:
+    """Download yearly and quarterly financials for companies with bounded concurrency and telemetry.
+
+    Enforces backpressure using `BoundedExecutor` to prevent unbounded task queue accumulation.
+    Emits structured `IngestionTelemetry` event upon completion.
+    """
+    verify_lakehouse_runtime()
     store = DuckDbFundamentalsStore(db_path=db_path)
     companies = fetch_large_midcap_universe(universe_category)
 
@@ -471,8 +490,11 @@ def download_fundamentals_to_duckdb(
     total_comps = len(companies)
     success_count = 0
     fail_count = 0
+    rows_written_total = 0
+    t0 = time.time()
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    # Use BoundedExecutor with queue size limit for strict backpressure
+    with BoundedExecutor(max_workers=max_workers, max_queue_size=max_workers * 2) as executor:
         future_to_comp = {
             executor.submit(fetch_and_parse_company, comp): comp for comp in companies
         }
@@ -482,6 +504,7 @@ def download_fundamentals_to_duckdb(
             try:
                 comp_meta, stmts, ratios, metrics = future.result()
                 store.save_company_data(comp_meta, stmts, ratios, metrics)
+                rows_written_total += len(stmts) + len(ratios) + len(metrics)
                 success_count += 1
                 if callable(progress_callback):
                     _ = progress_callback(i, total_comps, comp.symbol, True)
@@ -498,7 +521,58 @@ def download_fundamentals_to_duckdb(
                 if callable(progress_callback):
                     _ = progress_callback(i, total_comps, comp.symbol, False)
 
-    summary = store.get_summary()
+    duration_seconds = time.time() - t0
+    summary: dict[str, Any] = store.get_summary()
+
+    # Calculate coverage delta days from fiscal date span
+    min_date_str = summary.get("min_fiscal_date")
+    max_date_str = summary.get("max_fiscal_date")
+    coverage_delta_days = 0
+    if min_date_str and max_date_str:
+        try:
+            d_min = dt.date.fromisoformat(str(min_date_str))
+            d_max = dt.date.fromisoformat(str(max_date_str))
+            coverage_delta_days = max(0, (d_max - d_min).days)
+        except (ValueError, TypeError):
+            coverage_delta_days = 0
+
+    # Emit structured ingestion telemetry event
+    telemetry = emit_ingestion_telemetry(
+        universe=universe_category.upper(),
+        symbols_attempted=total_comps,
+        symbols_succeeded=success_count,
+        symbols_failed=fail_count,
+        rows_written=rows_written_total,
+        coverage_delta_days=coverage_delta_days,
+        duration_seconds=duration_seconds,
+    )
+
     summary["success_count"] = success_count
     summary["fail_count"] = fail_count
+    summary["rows_written"] = rows_written_total
+    summary["duration_seconds"] = duration_seconds
+    summary["telemetry"] = telemetry.to_dict()
+    summary["telemetry_json"] = telemetry.to_json()
     return summary
+
+
+async def download_fundamentals_to_duckdb_async(
+    universe_category: str = "ALL",
+    db_path: Path | str | None = None,
+    max_concurrency: int = 8,
+    limit: int | None = None,
+    skip_existing: bool = True,
+) -> dict[str, Any]:
+    """Asynchronously download company fundamentals using bounded semaphore backpressure."""
+    verify_lakehouse_runtime()
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: download_fundamentals_to_duckdb(
+            universe_category=universe_category,
+            db_path=db_path,
+            max_workers=max_concurrency,
+            limit=limit,
+            skip_existing=skip_existing,
+        ),
+    )

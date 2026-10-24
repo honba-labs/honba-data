@@ -5,6 +5,9 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from dataclasses import dataclass, field
+from typing import Any
+
+from honba_data.telemetry import IngestionTelemetry
 
 
 @dataclass(frozen=True)
@@ -57,3 +60,57 @@ class IngestionFailed(DomainEvent):
     provider: str = ""
     symbol: str = ""
     error_message: str = ""
+
+
+@dataclass(frozen=True)
+class IngestionCompleted(DomainEvent):
+    """Emitted upon completion of an offline or batch ingestion pipeline run."""
+
+    event: str = "ingestion_completed"
+    universe: str = ""
+    symbols_attempted: int = 0
+    symbols_succeeded: int = 0
+    symbols_failed: int = 0
+    rows_written: int = 0
+    coverage_delta_days: int = 0
+    duration_seconds: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Format as structured dictionary matching telemetry schema."""
+        ts_str = self.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+        return {
+            "timestamp": ts_str,
+            "event": self.event,
+            "universe": self.universe,
+            "symbols_attempted": self.symbols_attempted,
+            "symbols_succeeded": self.symbols_succeeded,
+            "symbols_failed": self.symbols_failed,
+            "rows_written": self.rows_written,
+            "coverage_delta_days": self.coverage_delta_days,
+            "duration_seconds": round(float(self.duration_seconds), 2),
+        }
+
+    def to_telemetry(self) -> IngestionTelemetry:
+        """Convert into structured IngestionTelemetry object."""
+        return IngestionTelemetry(
+            universe=self.universe,
+            symbols_attempted=self.symbols_attempted,
+            symbols_succeeded=self.symbols_succeeded,
+            symbols_failed=self.symbols_failed,
+            rows_written=self.rows_written,
+            coverage_delta_days=self.coverage_delta_days,
+            duration_seconds=self.duration_seconds,
+            timestamp=self.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            event=self.event,
+        )
+
+
+__all__ = [
+    "DomainEvent",
+    "FundamentalsIngested",
+    "CoverageLedgerUpdated",
+    "DataQualityAlertRaised",
+    "IngestionFailed",
+    "IngestionCompleted",
+    "IngestionTelemetry",
+]

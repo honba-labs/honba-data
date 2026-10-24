@@ -192,6 +192,11 @@ def main(argv: list[str] | None = None) -> int:
         "Run Result",
         f"Downloaded {summary['success_count']} successfully, {summary['fail_count']} failed",
     )
+    if "rows_written" in summary:
+        table.add_row(
+            "Rows Written (Telemetry)",
+            f"{summary['rows_written']:,} line items/ratios",
+        )
     console.print(table)
     return 0
 
