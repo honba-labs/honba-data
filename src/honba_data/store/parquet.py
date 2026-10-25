@@ -15,6 +15,7 @@ from honba_data.domain.coverage import (
     DateInterval,
 )
 from honba_data.domain.models import Bar, InstrumentId, as_bar, as_instrument_id
+from honba_data.store.fundamentals import find_data_root
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +96,6 @@ class ParquetBarStore:
         use_hive_partitions: bool = True,
     ) -> None:
         """``data_dir`` defaults to :func:`find_data_root`, resolved once here."""
-        from honba_data.store.fundamentals import find_data_root
-
         self.data_dir = Path(data_dir if data_dir is not None else find_data_root()).resolve()
         self.catalog_dir = self.data_dir / "catalog"
         self.ledger_file = self.data_dir / "coverage_ledger.json"
@@ -284,3 +283,6 @@ class ParquetBarStore:
 
         # Update ledger atomically through JsonCoverageRepository
         _ = self._coverage_repo.update_interval(record)
+
+
+__all__ = ["ParquetBarStore", "find_data_root", "BAR_SCHEMA"]
