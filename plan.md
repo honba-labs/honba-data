@@ -224,6 +224,20 @@ Downstream consumers (such as the strategy screener or signal engine) subscribe 
     - IndAS/GAAP accounting identity invariant audits (0 errors across all 5 mathematical identities).
     - Structured `--json` export for automated observability and monitoring.
 
+### Phase 6: Filings Document Lakehouse & Point-in-Time Citation Catalog (P1)
+> Supplies the raw-document half of `honba-kao`'s Filings Intelligence (Security Hub Filings tab, Research Dossiers), which today is 100% hardcoded mock data. `honba-data` is the sole custodian of filing documents and page-indexed verbatim text; `honba-nou` reads this catalog read-only to build its retrieval/embedding index and driver scoring (see `honba-nou/plan.md` §Phase 7); `honba-tamashii` never touches storage directly and only forwards MCP tool calls through to `honba-nou`.
+
+- [ ] **6.1 Filing Document & Page Domain Model**
+  - Add `domain/filings.py`: `FilingDocument` (`symbol`, `doc_type`: `annual_report` | `quarterly_result` | `concall_transcript` | `sec_10k` | `sec_10q`, `source_url`, `filed_date`, `sha256`, `storage_path`), `FilingPage` (`document_id`, `page_number`, `raw_text`), and `FilingQuote` (`document_id`, `page_number`, `char_span`, `verbatim_text`).
+- [ ] **6.2 Ingestion Adapters (NSE/BSE Corporate Filings + SEC EDGAR)**
+  - `adapters/providers/nse_filings.py` (existing) and new `adapters/providers/sec_edgar.py` fetch PDF/HTML filings; extract page-indexed plain text (no OCR scope creep beyond existing filing formats) into a Hive-partitioned Parquet catalog (`data/catalog/filings/{symbol}/{fiscal_year}/`) plus a DuckDB index table for query.
+- [ ] **6.3 `FilingsRepository` Port & Point-in-Time Gating**
+  - Define `ports/filings_repo.py`: `FilingsRepository` protocol (`save_document`, `get_pages(document_id)`, `search_by_symbol(symbol, as_of)`, `verify_quote(document_id, page_number, quoted_text) -> bool`).
+  - `verify_quote` performs an exact-substring check against the stored `FilingPage.raw_text` — this is the sole citation-verification mechanism for the whole Filings Intelligence feature; no embedding or fuzzy matching here.
+  - Apply the same PIT invariant as `get_ratios`: a filing is invisible to any `as_of` query before its `filed_date`.
+- [ ] **6.4 Service Surface for `honba-nou`**
+  - Extend `DataService` with `get_filing_pages(symbol, doc_type=None, as_of=None)` and `verify_quote(...)`, documented as the only sanctioned read path into the filings catalog for `honba-nou`'s retriever (Task 7.1) and citation verifier (Task 7.3).
+
 ---
 
 ## 4. Specific Changes Matrix
@@ -249,3 +263,4 @@ Downstream consumers (such as the strategy screener or signal engine) subscribe 
 3. **Point-in-Time Invariant**: `test_point_in_time.py` verifies zero look-ahead bias across 100% of tested corporate filings.
 4. **Coverage Monotonicity**: Property-based tests pass $10^4$ iterations with zero overlapping intervals or inconsistent ledger states.
 5. **Architectural Parity**: `honba-data status` cleanly outputs lakehouse health, filing coverage, and SEBI audited ground-truth reconciliation with **0.00% discrepancy**.
+6. **Filings Citation Integrity**: `verify_quote` returns `False` for 100% of fuzzed/altered quotations in the citation-verification test suite and `True` for 100% of exact verbatim excerpts pulled from the page catalog.
